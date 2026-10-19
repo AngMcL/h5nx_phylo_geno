@@ -1,0 +1,36 @@
+Script gisaid_clean_v2.Rmd run date: 2026-01-08
+Meta nrows minus dup IDs: 42415
+Excluded, vaccines: 5
+Excluded, passaged/lab derived: 229
+Meta nrow after excl vaccines, passaged: 42186
+Excluded, no date: 0
+Excluded, no host: 7
+Excluded, no location: 0
+Excluded, no date/host/location: 7
+Final nrow meta/nuc sequences gisaid: 337432
+N sequences duplicates within isolate_id|segment: 23985
+
+ N sequences PB2: 42179
+ N sequences PB1: 42179
+ N sequences PA: 42179
+ N sequences HA: 42179
+ N sequences NP: 42179
+ N sequences NA: 42179
+ N sequences M: 42179
+ N sequences NS: 42179
+protein sequences removed due to isolate_id not in nuc meta: 2898
+duplicate isolate_id|protein rows detected: 35606
+protein sequences removed due to duplicate isolate_id|protein (kept widest): 35606
+
+N sequences PB2: 41976
+N sequences PB1-F2: 39910
+N sequences PB1: 41692
+N sequences PA-X: 33930
+N sequences PA: 41993
+N sequences HA: 42049
+N sequences NP: 42079
+N sequences NA: 42053
+N sequences M2: 41634
+N sequences M1: 41869
+N sequences NEP: 41880
+N sequences NS1: 41897
