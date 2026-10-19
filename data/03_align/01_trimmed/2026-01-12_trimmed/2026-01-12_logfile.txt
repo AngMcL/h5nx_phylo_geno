@@ -1,0 +1,57 @@
+Run date: 2026-01-12
+Segment HA, initial align width = 2222
+Segment M, initial align width = 1784
+Segment NA, initial align width = 3836
+Segment NP, initial align width = 2896
+Segment NS, initial align width = 2527
+Segment PA, initial align width = 2975
+Segment PB1, initial align width = 4787
+Segment PB2, initial align width = 4700
+Total initial genome width = 25727
+Segment HA, final align width = 1776, removed = 446 columns
+Segment M, final align width = 1027, removed = 757 columns
+Segment NA, final align width = 1588, removed = 2248 columns
+Segment NP, final align width = 1566, removed = 1330 columns
+Segment NS, final align width = 890, removed = 1637 columns
+Segment PA, final align width = 2233, removed = 742 columns
+Segment PB1, final align width = 2342, removed = 2445 columns
+Segment PB2, final align width = 2341, removed = 2359 columns
+Total final genome width = 13763
+Protein HA, initial align width = 645
+Protein M1, initial align width = 258
+Protein M2, initial align width = 267
+Protein NA, initial align width = 565
+Protein NEP, initial align width = 276
+Protein NP, initial align width = 501
+Protein NS1, initial align width = 286
+Protein PA, initial align width = 774
+Protein PA-X, initial align width = 789
+Protein PB1, initial align width = 2579
+Protein PB1-F2, initial align width = 175
+Protein PB2, initial align width = 815
+Total initial proteome width = 7930
+Protein HA, final align width = 568, removed = 77 columns
+Protein M1, final align width = 252, removed = 6 columns
+Protein M2, final align width = 97, removed = 170 columns
+Protein NA, final align width = 509, removed = 56 columns
+Protein NEP, final align width = 121, removed = 155 columns
+Protein NP, final align width = 498, removed = 3 columns
+Protein NS1, final align width = 230, removed = 56 columns
+Protein PA, final align width = 716, removed = 58 columns
+Protein PA-X, final align width = 252, removed = 537 columns
+Protein PB1, final align width = 757, removed = 1822 columns
+Protein PB1-F2, final align width = 90, removed = 85 columns
+Protein PB2, final align width = 759, removed = 56 columns
+Protein HA, trimmed amino acid align width = 568
+Protein M1, trimmed amino acid align width = 252
+Protein M2, trimmed amino acid align width = 97
+Protein NA, trimmed amino acid align width = 509
+Protein NEP, trimmed amino acid align width = 121
+Protein NP, trimmed amino acid align width = 498
+Protein NS1, trimmed amino acid align width = 230
+Protein PA, trimmed amino acid align width = 716
+Protein PA-X, trimmed amino acid align width = 252
+Protein PB1, trimmed amino acid align width = 757
+Protein PB1-F2, trimmed amino acid align width = 90
+Protein PB2, trimmed amino acid align width = 759
+Total trimmed proteome width = 4849

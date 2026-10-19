@@ -1,0 +1,12 @@
+,,,,End trim,min nuc 95 ,min nuc 95 ,min nuc 95 ,min nuc 90 ,min nuc 70%,min nuc 10%,
+,segment,min,max,Internal,max gap 90,max gap 95, max gap 99, max gap 99, max gap 99, max gap 99,v1 widths
+4,HA,1650,1900,,1704,1704,1708,1708,1708,1776,"Segment HA, trimmed align width = 1780"
+7,M,980,1100,,981,981,981,982,982,1027,"Segment M, trimmed align width = 1027"
+6,NA,1300,1500,,1451,1499,1525,1525,1525,1588,"Segment NA, trimmed align width = 1511"
+5,NP,1500,1600,,1497,1497,1498,1498,1498,1566,"Segment NP, trimmed align width = 1565"
+8,NS,850,950,,838,838,838,838,838,890,"Segment NS, trimmed align width = 891"
+3,PA,2180,2300,,2151,2151,2151,2151,2151,2233,"Segment PA, trimmed align width = 2233"
+2,PB1,2300,2400,,2274,2274,2274,2274,2274,2342,"Segment PB1, trimmed align width = 2341"
+1,PB2,2300,2400,,2280,2280,2280,2280,2280,2341,"Segment PB2, trimmed align width = 2341"
+,,,,,,,,,,,
+,,,,,,,,,,,

@@ -1,0 +1,309 @@
+---
+title: "Trim the fluff"
+output: github_document
+date: "2025-04-03"
+---
+
+## objectives
+* trim nucleotides or amino acids (to add: coding region) if >95% gaps
+
+## TO DO
+* Rewrite to use less memory
+* move all into one loop and overwrite previous one once done
+* should turn this into .R with arguments for folder and threshold to standardize
+
+# Setup
+## Libs
+```{r, message=F}
+library(Biostrings)
+library(tidyverse)
+library(gtools) #mixedsort
+library(purrr)
+```
+
+## Ins and Outs
+```{r}
+# Input merged/aligned sequences
+f.in.fasta<-paste0("../00_aligned/aligned/")
+nuc.fasta.in<-list.files(f.in.fasta,pattern="merged_nuc",full.names=T)%>%mixedsort()
+prot.fasta.in<-list.files(f.in.fasta,pattern="merged_prot",full.names=T)%>%mixedsort()
+
+# meta (to check full match with seqs)
+f.in.meta<-paste0("../../02_merge/2026-01-08_merged/merged_meta/")
+nuc.meta.in<-list.files(f.in.meta,pattern="*merged_meta*",full.names=T)%>%mixedsort()
+
+# Output
+today<-Sys.Date()
+f.out<-paste0(today,"_trimmed/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+# segment/protein ordering
+segments0<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+segments<-segments0%>%
+  mixedsort()
+# those rep'd in data
+mix<-str_split(nuc.fasta.in, "_|\\.") %>% unlist
+#only look at segments that are present in dataset
+segments<-segments[which(segments %in% mix)]
+l.seg<-length(segments)
+
+prot.ord<-c("PB2","PB1","PB1-F2","PA-X","PA","HA","NP","NA","M1","M2","NEP","NS1")%>%
+  mixedsort()
+mix.p<-str_split(prot.fasta.in, "_|\\.") %>% unlist
+prot.ord<-prot.ord[which(prot.ord %in% mix.p)]
+l.prot<-length(prot.ord)
+
+# main outputs
+nuc.fasta.out<-str_replace_all(nuc.fasta.in,f.in.fasta,f.out)%>%
+  str_replace_all("merged","trim")
+prot.fasta.out<-str_replace_all(prot.fasta.in,f.in.fasta,f.out)%>%
+  str_replace_all("merged","trim")
+
+# logfile
+text.out<-paste0(f.out,today,"_logfile.txt")
+cat(paste0("Run date: ",today),file=text.out,sep="\n",append=F)
+```
+
+## Main loop
+```{r}
+#TRIM GAPERS (end trim only)
+#ability to make per-seg diffs to get different final widths
+min.nuc_end_byseg<-c(
+ "PB2"=0.1,
+ "PB1"=0.1,
+ "PA"=0.1,
+ "HA"=0.1,
+ "NP"=0.1,
+ "NA"=0.1,
+ "M"=0.1,
+ "NS"=0.1
+)
+
+#exclude rows with >90% gaps from anchor calc only (denominator is conserv)
+row_gap_max_calc<-0.90 
+
+# optional internal trim 
+#keep if gap fraction (gaps per width) <= max.gap_internal; NULL to disable
+max.gap_internal<-0.99
+
+## Read nuc fasta
+nuc<-map(nuc.fasta.in,readDNAStringSet)
+
+## Log initial widths
+tot0<-c()
+for(i in 1:l.seg){
+ ww<-width(nuc[[i]][1])
+ cat(paste0("Segment ",segments[i],", initial align width = ",ww),file=text.out,sep="\n",append=TRUE)
+ tot0<-c(tot0,ww)
+}
+cat(paste0("Total initial genome width = ",sum(tot0)),file=text.out,sep="\n",append=TRUE)
+
+## Trim (end-only) + write outputs + metrics
+metrics<-tibble()
+
+for(i in 1:l.seg){
+ print(paste0("Trimming nucleotides for ",segments[i]))
+
+ seg<-segments[i]
+ nm0<-names(nuc[[i]])
+ width.i<-width(nuc[[i]][1])
+ nseq<-length(nuc[[i]])
+ #make nuc a matrix to calc gaps
+ mat<-as.matrix(nuc[[i]])
+
+ gap_frac_row<-rowMeans(mat=="-")
+ use_row<-gap_frac_row<=row_gap_max_calc #is it too gappy?
+ n_excl<-sum(!use_row)
+ if(sum(use_row)<10){
+  stop(paste0("Too few sequences after temporary gap filter for ",seg))
+ }
+ # ambiguous counts as present; only "-" is gap
+ cov<-colMeans(mat[use_row,,drop=FALSE]!="-")
+ thr<-min.nuc_end_byseg[seg]
+ #find positions that are good as end trim anchors based on having >95% nucs (5% -) 
+ #within anchors is a contiguous region considered separately for gap threshold (diff underlying mechanisms, indels, seq diffs)
+ good<-cov>=thr
+ if(!any(good)){
+  stop(paste0("No end-trim anchors found for ",seg," at thr=",thr,"; lower min.nuc_end for this segment"))
+ }
+
+ first<-min(which(good))
+ last<-max(which(good))
+ keep_pos<-seq.int(first,last)
+ #keep positions onlyyy
+ mat2<-mat[,keep_pos,drop=FALSE]
+ 
+ # optional: internal trim after end trim
+  if(!is.null(max.gap_internal)){
+   gap_frac_col<-colMeans(mat2=="-")
+   #keep columns with gap fraction less than the max gap of 90-95% (above)
+   keep_col<-gap_frac_col<=max.gap_internal
+   if(!any(keep_col)){
+    stop(paste0("No columns kept after internal gap trim for ",seg,"; relax max.gap_internal"))
+   }
+   mat2<-mat2[,keep_col,drop=FALSE]
+  }
+
+ nuc[[i]]<-DNAStringSet(apply(mat2,1,paste0,collapse=""))
+ names(nuc[[i]])<-nm0
+
+ width.f<-ncol(mat2)
+ rm<-width.i-width.f
+
+ print(paste0("  width ",width.i," -> ",width.f," (removed ",rm,")",
+              "; thr=",thr,
+              "; temp_excl_rows=",n_excl))
+
+ cat(paste0("Segment ",seg,", final align width = ",width.f,", removed = ",rm," columns"),file=text.out,sep="\n",append=TRUE)
+
+ metrics<-bind_rows(metrics,tibble(
+  segment=seg,
+  n_seqs=nseq,
+  aln_len_in=width.i,
+  aln_len_out=width.f,
+  cols_removed=rm,
+  frac_cols_removed=rm/width.i,
+  min.nuc_end=thr,
+  row_gap_max_calc=row_gap_max_calc,
+  temp_excl_rows=n_excl
+ ))
+}
+
+cat(paste0("Total final genome width = ",sum(metrics$aln_len_out)),file=text.out,sep="\n",append=TRUE)
+
+## Export trimmed fasta
+walk2(nuc,nuc.fasta.out,function(x,f){
+ writeXStringSet(x,filepath=f,format="fasta")
+})
+
+## Export metrics csv
+write_csv(metrics,paste0(f.out,today,"_trim_metrics.csv"))
+```
+
+#Any issue with mismatched names?
+```{r}
+# Input merged metadata 
+#set up empty lists for meta 
+nuc.meta<-replicate(n=l.seg, vector())
+
+#read and print matchiness
+for(i in 1:l.seg){
+  nuc.meta[[i]]<-read.csv(nuc.meta.in[i])
+  all(names(nuc[[i]]) %in% nuc.meta[[i]]$seq_new) %>% print
+}
+```
+
+# Protein sequences
+## read in prot seqs, trim gaps, export
+```{r}
+prot<-replicate(n=l.prot,vector())
+
+## Read protein data + log initial widths
+tot0<-c()
+for(i in 1:l.prot){
+ print(paste0("Reading protein data for ",prot.ord[i]))
+ prot[[i]]<-readAAStringSet(prot.fasta.in[i])
+ ww<-width(prot[[i]][1])
+ cat(paste0("Protein ",prot.ord[i],", initial align width = ",ww),
+     file=text.out,sep="\n",append=TRUE)
+ tot0<-c(tot0,ww)
+}
+cat(paste0("Total initial proteome width = ",sum(tot0)),
+    file=text.out,sep="\n",append=TRUE)
+
+## Params (protein)
+min.aa_end_byprot<-setNames(rep(0.1,l.prot),prot.ord) #end anchors on non-gap coverage
+row_gap_max_calc_aa<-0.90 #exclude rows with >90% gaps from denominator (remove in clean align)
+
+# optional internal trim (keep if gap fraction <= max.gap_internal_aa); set NULL to disable
+# max.gap_internal_aa<-NULL
+max.gap_internal_aa<-0.99
+
+## TRIM GAPERS (end trim + optional internal gap trim; no per-seq letter loop)
+metrics.prot<-tibble()
+
+for(i in 1:l.prot){
+ print(paste0("Trimming amino acids for ",prot.ord[i]))
+
+ protname<-prot.ord[i]
+ nm0<-names(prot[[i]])
+ width.i<-width(prot[[i]][1])
+ nseq<-length(prot[[i]])
+
+ mat<-as.matrix(prot[[i]])
+
+ # temporarily exclude ultra-gappy rows from coverage calculation only
+ gap_frac_row<-rowMeans(mat=="-")
+ use_row<-gap_frac_row<=row_gap_max_calc_aa
+ n_excl<-sum(!use_row)
+ if(sum(use_row)<10){
+  stop(paste0("Too few sequences after temporary gap filter for ",protname))
+ }
+
+ cov<-colMeans(mat[use_row,,drop=FALSE]!="-")
+ thr<-min.aa_end_byprot[protname]
+
+ good<-cov>=thr
+ if(!any(good)){
+  stop(paste0("No end-trim anchors found for ",protname," at thr=",thr,"; lower min.aa_end for this protein"))
+ }
+
+ first<-min(which(good))
+ last<-max(which(good))
+ keep_pos<-seq.int(first,last)
+ mat2<-mat[,keep_pos,drop=FALSE]
+
+ # optional internal gap trim after end trim
+ if(!is.null(max.gap_internal_aa)){
+  gap_frac_col<-colMeans(mat2=="-")
+  keep_col<-gap_frac_col<=max.gap_internal_aa
+  if(!any(keep_col)){
+   stop(paste0("No columns kept after internal gap trim for ",protname,"; relax max.gap_internal_aa"))
+  }
+  mat2<-mat2[,keep_col,drop=FALSE]
+ }
+
+ prot[[i]]<-AAStringSet(apply(mat2,1,paste0,collapse=""))
+ names(prot[[i]])<-nm0
+
+ width.f<-ncol(mat2)
+ rm<-width.i-width.f
+
+ print(paste0("  width ",width.i," -> ",width.f," (removed ",rm,")",
+              "; thr=",thr,
+              "; temp_excl_rows=",n_excl))
+
+ cat(paste0("Protein ",protname,", final align width = ",width.f,", removed = ",rm," columns"),
+     file=text.out,sep="\n",append=TRUE)
+
+ metrics.prot<-bind_rows(metrics.prot,tibble(
+  protein=protname,
+  n_seqs=nseq,
+  aln_len_in=width.i,
+  aln_len_out=width.f,
+  cols_removed=rm,
+  frac_cols_removed=rm/width.i,
+  min.aa_end=thr,
+  row_gap_max_calc=row_gap_max_calc_aa,
+  temp_excl_rows=n_excl,
+  max.gap_internal=max.gap_internal_aa
+ ))
+}
+
+## write trimmed aligns + log final widths
+tot<-c()
+for(i in 1:l.prot){
+ Biostrings::writeXStringSet(prot[[i]],prot.fasta.out[i])
+ ww<-width(prot[[i]][1])
+ cat(paste0("Protein ",prot.ord[i],", trimmed amino acid align width = ",ww),
+     file=text.out,sep="\n",append=TRUE)
+ tot<-c(tot,ww)
+}
+cat(paste0("Total trimmed proteome width = ",sum(tot)),
+    file=text.out,sep="\n",append=TRUE)
+
+## export protein trim metrics
+write_csv(metrics.prot,paste0(f.out,today,"_trim_metrics_prot.csv"))
+
+```
+
