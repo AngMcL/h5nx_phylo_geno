@@ -1,0 +1,1072 @@
+---
+title: "Summarize flumut output"
+output: github_document
+date: "2025-04-21"
+---
+
+# Objectives:
+* read in multiple batches output of flumut: mutations, markers, literature. Merge across batches.
+* parse the mutation from the subtype
+* lookup the subtype in the metadata. Filter mutations based on matching
+* output missing or suspect subtype
+* summarize the mutations as frequency across positions
+* count unique mutation by type/effect, segment
+
+## Changes in v10 (2026-10), ported from wildlife summarize-muts_202609.Rmd
+* read flumut tsv as character: columns with only "T" or "F" were parsed as logical TRUE/FALSE (threonine/phenylalanine), now converted back to the amino acid
+* drop redundant inverse PB2.K627E (keep E627K)
+* marker effects joined per mutation: all effects collapsed with ";" (effect_multi) and first effect (effect_first, single-mutation markers preferred)
+* markers deduplicated on marker+effect (not marker only, which dropped ~half of the effects)
+* mammal and drug-resistance flags from effect text (fixes "oseltamavir" typo; covers all neuraminidase inhibitors, adamantanes, baloxavir, favipiravir)
+* bar plots with effect text, for all mutations and for mammal/drug-related mutations
+* ambiguous residues (mixtures) are their own type; residue plots: all residues, NonWildResidue (prim+sec+mixture), PrimaryResidue
+* per-protein plots in figures/{PROT}/ subfolders
+
+## to do
+* calculate shannon diversity, entropy, ... by position
+* connect to existing metadata for downstream modelling (mutation of interest presence/absence as covariates)
+
+# Setup
+## Libs
+```{r, message=F}
+library(tidyverse)
+library(gtools)
+library(NatParksPalettes)
+library(data.table)
+library(purrr)
+```
+
+## In and out
+```{r}
+# Ins
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS") 
+segments.ms<-segments %>% mixedsort()
+l.seg<-length(segments)
+
+# Flumut muts, markers, lit
+f.in<-"../02_output-flumut/"
+mut.in<-list.files(f.in, pattern="mutations_output.tsv",full.names = T) %>% mixedsort()
+mark.in<-list.files(f.in, pattern="markers_output.tsv",full.names = T) %>% mixedsort()
+lit.in<-list.files(f.in, pattern="lit_output.tsv",full.names = T) %>% mixedsort()
+n.b<-length(mut.in) #batches of 20,000 samps
+
+# Metadata for same sequences
+f.meta.in<-"../01_format-input/2026-01-13_format_flumut/"
+meta.in<-list.files(f.meta.in, pattern="meta",full.names = T) %>% mixedsort()
+
+#Check merged metadata
+f.meta2.in<-"../../../04_clean-align/2026-01-12_clean_aligns_wg_out/cleaned_meta/"
+meta2.in<-list.files(f.meta2.in, pattern="merged_cleaned_meta",full.names = T) %>% mixedsort()
+
+#prot/segment lookup
+lookup.fold<-"../../../01a_ncbi/clean_ncbi/lookups/"
+prot.segment.look<-paste0(lookup.fold,"prot.nm.segment.csv")
+
+#lookup amino codes
+amino.in<-"amino/amino-acid.csv"
+
+# Outs
+today<-Sys.Date()
+f.out<-paste0(today,"_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+## Figures out
+fig.out<-paste0(f.out,"figures/")
+if(!dir.exists(fig.out)){dir.create(fig.out)}
+
+## Missing subtype list ?
+sub.out<-paste0(f.out,"missing_sub.csv")
+
+## Mutations (no subtype in name, but filtered on whether matches meta subtype)
+mut.out<-paste0(f.out, "mut_clean.csv")
+mut.long.out<-paste0(f.out, "mut_long.csv")
+mark.out<-paste0(f.out, "mark_clean.csv")
+lit.out<-paste0(f.out, "lit_clean.csv")
+mut.effect.out<-paste0(f.out, "mut_effects.csv")
+
+## Checkpoint of parsed long muts
+ckpt.out<-paste0(f.out, "muts.all.long2.csv")
+
+#by segment, wide
+mut.seg<-paste0(segments.ms, "_flumuts.csv")
+```
+
+## Plotting themes
+```{r}
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"),
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8))
+plot.theme.date<-plot.theme+
+  theme(axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+
+# Segment colors
+segment.cols<-natparks.pals(name="Yellowstone", n=length(segments))
+segment.cols<-segment.cols[c(1,5,2,4,6,3,8,7)]
+names(segment.cols)<-segments
+```
+
+# Read and clean data
+## read and merge flumut mutations, markers, literature
+```{r  warning=FALSE }
+#lists with element for each batch number
+mut<-mark<-lit<-meta<-replicate(n=n.b, vector())
+
+# Read across batches - ignore warnings (empty rows for some cols)
+for (i in 1:n.b){
+  #as character, otherwise a column of only T or F residues is read as logical TRUE/FALSE
+  #na.strings="" so an N/A mixture residue "NA" isn't read as missing
+  mut[[i]]<-read.delim(mut.in[i], colClasses = "character", na.strings = "")
+
+  lit[[i]]<-read.delim(lit.in[i])  #not all cols have names
+  mark[[i]]<-read.delim(mark.in[i]) #need to process further
+  
+  meta[[i]]<-read.csv(meta.in[i], header = T)
+  meta[[i]]$date_parse<-as.character(meta[[i]]$date_parse)
+}
+
+# Merge across batches
+mut.all<-bind_rows(mut)
+#all mutations reported by flumut (union of batch columns), for counts by protein
+flumut.muts<-setdiff(colnames(mut.all), "Sample") %>% str_replace_all("PB1.F2", "PB1-F2")
+length(flumut.muts) #300
+meta.all<-bind_rows(meta)
+
+#get rid of nonsense cols
+meta.all<-meta.all %>% select(-any_of(c("X.3","X.2", "X.1", "X")))
+colnames(meta.all) #seq_newflu was designated for sequence names
+
+rm(meta)
+rm(mut)
+```
+
+## Literature and markers
+```{r}
+#remove dups and write unique lit
+lit.all<-bind_rows(lit) %>%
+  distinct(DOI, .keep_all = TRUE)
+nrow(lit.all) #46 citations
+write.csv(lit.all, lit.out)
+rm(lit.all)
+rm(lit)
+
+## markers and their functions
+#distinct on marker AND effect: one marker can have several effects (distinct on Marker alone kept 251 of 520)
+mark.all<-bind_rows(mark) %>%
+  select (-Sample, -Mutations.in.your.sample) %>%
+  mutate(Effect=trimws(Effect)) %>%
+  distinct(Marker, Effect, .keep_all = TRUE)
+
+nrow(mark.all) #520
+length(unique(mark.all$Marker)) #251
+# table(mark.all$Marker)
+write.csv(mark.all, mark.out)
+rm(mark)
+```
+
+## Marker effects per mutation (mammal and drug flags)
+```{r}
+#effect text patterns (lowercase); "2[-–]6" catches both hyphen and en dash in flumut text
+mamm.pattern<-"human|mammal|ferret|cattle|swine|guinea|mice|2[-–]6"
+#"amivir" = oseltamivir, zanamivir, peramivir, laninamivir; "zanamiriv" and "amantidine" are typos in flumut db
+drug.pattern<-"amivir|zanamiriv|baloxavir|favipiravir|amantadine|amantidine|rimantadine"
+
+#split combination markers into single mutations, convert to mutation col names (e.g. "HA1-5:S107R" -> "HA1.5.S107R")
+mark.all.long<-mark.all %>%
+  mutate(marker_full=Marker,
+         combo=str_detect(Marker, ",")) %>%
+  separate_rows(Marker, sep = ",\\s*") %>%
+  mutate(mutation=str_replace_all(Marker, "\\:|-", ".") %>%
+           str_replace_all("PB1.F2", "PB1-F2"))
+
+#one row per mutation: all effects (;) and first effect, single-mutation markers first
+mut.effects<-mark.all.long %>%
+  arrange(combo) %>%
+  group_by(mutation) %>%
+  summarise(effect_multi=paste(unique(Effect), collapse = "; "),
+            effect_first=first(Effect),
+            n_effects=n_distinct(Effect),
+            combo_only=all(combo),
+            markers=paste(unique(marker_full), collapse = " | "),
+            mammal=any(str_detect(tolower(Effect), mamm.pattern)),
+            drug=any(str_detect(tolower(Effect), drug.pattern)),
+            .groups = "drop") %>%
+  mutate(marker_class=case_when(mammal & drug ~ "mammal+drug",
+                                mammal ~ "mammal",
+                                drug ~ "drug",
+                                TRUE ~ "other"))
+table(mut.effects$marker_class)
+
+#CHECK effects not flagged as mammal or drug - scan for anything missed
+mark.all %>%
+  filter(!str_detect(tolower(Effect), paste(mamm.pattern, drug.pattern, sep = "|"))) %>%
+  distinct(Effect) %>% arrange(Effect)
+
+write.csv(mut.effects, mut.effect.out, row.names = F)
+rm(mark.all)
+```
+
+## Match mut.all samples to meta all
+```{r}
+#Dims
+nrow(mut.all) #41427
+length(unique(mut.all$Sample)) #41427 YES, the right number
+length(which(duplicated(mut.all$Sample))) #0
+ 
+nrow(meta.all) #331416 across segments
+length(unique(meta.all$seq_newflu)) #331416
+length(unique(meta.all$seq_new)) #331416
+length(unique(meta.all$sample)) #41427
+# 331416/8==41427
+
+#how matching?
+samps<-mut.all$Sample %>% unique
+length(samps) #41427
+
+meta.all<-meta.all %>%
+  separate(seq_newflu, into=c("sample_flu","seg_flu"),sep="_",remove = F) 
+
+which(samps %in% meta.all$sample_flu) %>% length #41427!  
+no.m<-which(!samps %in% meta.all$sample_flu)
+length(no.m) #0 is good
+
+# Process the dataframe
+muts.all<-mut.all %>%
+  distinct(Sample, .keep_all = TRUE)
+
+#lookin good: 
+dim(muts.all)
+nrow(muts.all)==length(unique(muts.all$Sample))
+#full match
+all(muts.all$Sample %in% meta.all$sample_flu)
+
+rm(mut.all)
+muts.all$sample_flu<-muts.all$Sample
+muts.all<-muts.all %>% select(-Sample)
+ncol(muts.all)-1 #300 mutations called
+muts.all<-muts.all[,c(ncol(muts.all), 2:(ncol(muts.all)-1) )]
+```
+
+## pivot long and remove empty
+```{r}
+# <protein.type[for HA and NA].mutation>
+# mutation is aa wildtype, amino acid position [which numbering system?], aa mutant
+# find out what the reference is for wildtype
+
+#Pivot long to parse these as columns
+muts.all.long<-muts.all %>% 
+  pivot_longer(cols=2:ncol(muts.all), names_to = "mutation", values_to="residue")
+
+#remove prev for mem
+rm(muts.all)
+muts.all.long %>% nrow #8.7M rows big ol data
+
+# Remove empty data
+empty1<-which(muts.all.long$residue=="")
+empty2<-which(is.na(muts.all.long$residue))
+length(empty1);length(empty2) #ALOT
+empty<-unique(c(empty1,empty2))
+if(length(empty)>0){
+  muts.all.long<-muts.all.long[-empty,]
+}
+muts.all.long %>% nrow #5.2M ... still alot of data
+```
+
+## separate/parse the protein, mutation, subtype
+```{r, message=FALSE}
+#separate mutation string
+#replace this with -
+muts.all.long$mutation[str_which(muts.all.long$mutation,"PB1.F2")]
+muts.all.long$mutation<-str_replace_all(muts.all.long$mutation, "PB1.F2", "PB1-F2")
+
+# Convert to data.table if not already
+muts.all.long2<-muts.all.long
+setDT(muts.all.long2)
+
+# Split into 3 columns, filling from the left (so subtype ends up in the middle)
+muts.all.long2[, c("part1", "part2", "part3") := tstrsplit(mutation, "\\.", fixed = FALSE, fill = "")]
+
+# Use logic to assign proper columns
+muts.all.long2[, `:=`(
+  protein = ifelse(part3 == "", part1, part1),
+  sub = ifelse(part3 == "", NA_character_, part2),
+  mut = ifelse(part3 == "", part2, part3)
+)]
+
+# Drop temporary columns
+muts.all.long2[, c("part1", "part2", "part3") := NULL]
+table(muts.all.long2$protein)
+
+# muts.all.long2$protein %>% table
+# muts.all.long2$sub %>% table # these are muts where subtypes are 1:5 (HA and NA types) and otherwise empty
+# muts.all.long2$mut %>% table # missing mut where it's subtype
+
+
+# Extract mutation parts from mut (e.g., "A123T")
+muts.all.long2[, mut.wt := str_sub(mut, 1, 1)]
+muts.all.long2[, mut.mut := str_sub(mut, -1)]
+muts.all.long2[, mut.pos := as.numeric(str_sub(mut, 2, -2))]
+
+# Assign mutation type based on comparison
+muts.all.long2[, type := fifelse(residue == mut.wt, "wild",
+                          fifelse(residue == mut.mut, "mut_prim", "mut_sec"))]
+
+#Check summary
+table(muts.all.long2$type)
+```
+
+## Deal with residue==TRUE/FALSE and redundant inverse mutation
+```{r}
+#should be none now that tsv is read as character; v2.1 had 5000 TRUE (PA.S515T, PB2.V598T)
+#TRUE/FALSE are the amino acids T (threonine) and F (phenylalanine), not present/absent
+tf<-which(muts.all.long2$residue %in% c("TRUE","FALSE"))
+length(tf)
+if(length(tf)>0){
+  muts.all.long2[tf, residue := fifelse(residue == "TRUE", "T", "F")]
+  muts.all.long2[tf, type := fifelse(residue == mut.wt, "wild",
+                                fifelse(residue == mut.mut, "mut_prim", "mut_sec"))]
+}
+
+#inverse pairs (same position, wt and mut swapped)
+inv<-unique(muts.all.long2[, .(protein, mutation, mut.pos, mut.wt, mut.mut)])
+merge(inv, inv, by.x=c("protein","mut.pos","mut.wt","mut.mut"),
+      by.y=c("protein","mut.pos","mut.mut","mut.wt"))
+
+## redundant: keep E627K remove K627E
+muts.all.long2<-muts.all.long2[mutation != "PB2.K627E"]
+table(muts.all.long2$mutation[muts.all.long2$protein=="PB2"])
+
+#CHECK all marker mutations match mutation cols (K627E only in a combo marker)
+setdiff(mut.effects$mutation, unique(muts.all.long2$mutation))
+```
+
+# Summarize mutations
+
+## Subtype color
+```{r}
+sub.count<-meta.all %>% 
+  filter(segment=="HA") %>% #reps sample_flu
+  dplyr::group_by(subtype) %>%
+  count() %>% as.data.frame() 
+subtype.ord<-sub.count$subtype[order(sub.count$n,decreasing = T)]
+
+subtype.cols<-natparks.pals(name="Olympic", n=length(unique(meta.all$subtype)))
+names(subtype.cols)<-subtype.ord
+```
+
+## order mutations within proteins for viz
+```{r}
+#Join protein to segment
+prot.seg<-read.csv(prot.segment.look, header=T)
+prot.seg<-prot.seg[,-1] #poubelle
+
+#Make sure not interpreted as NA
+if(any(is.na(prot.seg$protein.name))){
+  na.prot<-which(is.na(prot.seg$protein.name))
+  na.seg<-which(is.na(prot.seg$segment))
+  if(length(na.prot)>0){prot.seg$protein.name[na.prot]<-"NA"}
+  if(length(na.seg)>0){prot.seg$segment[na.seg]<-"NA"}
+}
+
+#all have matchs in lookup?
+all(muts.all.long2$protein %in% prot.seg$protein.name)
+# prot.seg$segment<-str_replace_all(prot.seg$segment, c("M"="MP"))
+colnames(prot.seg)[1]<-"protein"
+muts.all.long2<-muts.all.long2 %>% left_join (prot.seg, by="protein")
+# table(muts.all.long2$segment)
+#order for factors
+# protein.ord<-prot.seg$protein[which(prot.seg$protein %in% muts.all.long2$protein)]
+# protein.ord #this order isn't good
+protein.ord<-c("PB2","PB1","PB1-F2","PA","NP","HA1","HA2","NA","M1","M2","NS")
+n.prot<-length(protein.ord)
+muts.all.long2$protein<-factor(muts.all.long2$protein, levels=protein.ord)
+muts.all.long2$segment<-factor(muts.all.long2$segment, levels=segments)
+
+#mutation order for each protein
+ords<-replicate(n=n.prot, vector())
+for (i in 1:n.prot){
+  ords[[i]]<-muts.all.long2 %>%
+    filter(protein == protein.ord[i]) %>%
+    arrange(mut.pos) %>%
+    select(mut) %>% unique()
+  ords[[i]]$protein<-protein.ord[i]
+  ords[[i]]<-ords[[i]] %>% left_join (prot.seg, by="protein")
+  ords[[i]]$segment<-factor(ords[[i]]$segment, levels = segments)
+  ords[[i]]$protein<-factor(ords[[i]]$protein, levels = protein.ord)
+}
+ords.df<-bind_rows(ords)
+mut.ords<-ords.df$mut
+
+#protein version - before renaming dups, otherwise e.g. NS:V149A becomes NS:NS_V149A and is NA in the data
+ords.df<-ords.df %>% unite("protmut", protein, mut, sep=":",remove = F)
+protmut.ords<-ords.df$protmut
+
+if(any(duplicated(mut.ords))){
+  dup<-which(duplicated(mut.ords))
+  #add the protein on to the dup, have to be unique
+  ords.df$mut[dup]<-paste0(ords.df$protein[dup],"_", ords.df$mut[dup])
+  mut.ords<-ords.df$mut
+}
+muts.all.long2$mut<-factor(muts.all.long2$mut, levels=mut.ords)
+
+## per-protein figure subfolders
+walk(protein.ord, \(prot){
+  d<-file.path(fig.out, prot)
+  if(!dir.exists(d)) dir.create(d)
+})
+```
+
+# write checkpoint after slow loop
+```{r}
+write.csv(muts.all.long2, ckpt.out)
+```
+
+# read checkpoint
+```{r}
+#newest output folder with a checkpoint (sort not mixedsort: mixedsort misorders ISO dates)
+ckpt.in<-list.files(".", pattern="^\\d{4}-\\d{2}-\\d{2}_out$") %>% sort() %>%
+  file.path("muts.all.long2.csv") %>% keep(file.exists) %>% tail(1)
+ckpt.in
+#residue as character, na.strings="" so protein/segment "NA" and residue "NA" stay strings
+muts.all.long2<-read.csv(ckpt.in, colClasses=c(residue="character"), na.strings="")
+# colnames(muts.all.long2)
+
+#format factors and NAs
+muts.all.long2$mut<-factor(muts.all.long2$mut, levels=mut.ords)
+muts.all.long2$protein<-factor(muts.all.long2$protein, levels=protein.ord)
+muts.all.long2$segment<-factor(muts.all.long2$segment, levels=segments)
+if(any(is.na(muts.all.long2$segment))){ #NA is not NA
+  muts.all.long2$segment[which(is.na(muts.all.long2$segment))]<-"NA"
+  muts.all.long2$protein[which(is.na(muts.all.long2$protein))]<-"NA"
+}
+```
+
+## add metadata
+```{r}
+## add isolate_name and host to be able to match to original meta
+meta.less<-meta.all[,c("sample","sample_flu","host","genotype","clade")] #the only cols we want for now
+meta.less<-meta.less[-which(duplicated(meta.less$sample_flu)), ] #remove identical dups (across segs)
+
+muts.all.long2<-left_join(muts.all.long2, meta.less, by="sample_flu")
+
+## Make a version of muts with the protein
+muts.all.long2<-muts.all.long2 %>% unite("protmut", protein, mut, sep = ":", remove=FALSE)
+
+#new order for protmuts
+muts.all.long2$protmut<-factor(muts.all.long2$protmut, levels=protmut.ords)
+
+muts.all.long2$genotype<-str_replace_all(muts.all.long2$genotype,
+                                         "\\(\\<i style\\=\\'font-size\\:11px\\'\\>GenoFLU\\<\\/i\\>\\)", "") %>% trimws()
+
+#which ones have subtypes as genotypes? 
+dd<-str_which(muts.all.long2$genotype, "H5")
+# muts.all.long2$genotype[dd] %>% table
+# muts.all.long2[dd,]
+```
+
+## summarize frequency of mutations by position, protein/segment
+```{r}
+muts.all.long2 %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  ggplot()+
+  geom_bar(aes(x=mut, fill=segment))+
+  plot.theme.date+
+  facet_wrap(~protein, scales="free", nrow=3)+
+  labs(x="Mutation of interest",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=4),
+        legend.position = c(0.8,0.15))
+ggsave(paste0(fig.out,"flumuts_by-protein_facet.png"),width = 12,height=8,units = "in")
+
+#most frequent muts
+amuts.total<-muts.all.long2 %>% filter(! type %in% "wild") %>%  count(mut)
+amostfreq<-amuts.total %>% filter(n>500) %>% select (mut)
+amostfreqmut<-as.character(amostfreq$mut )
+
+aprotmuts.total<-muts.all.long2 %>% filter(! type %in% "wild") %>%  count(protmut)
+aprotmostfreq<-aprotmuts.total %>% filter(n>1000) %>% select (protmut)
+aprotmostfreqmut<-as.character(aprotmostfreq$protmut )
+
+muts.all.long2 %>%
+  filter(protmut %in% aprotmostfreqmut) %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  filter(!is.na(protmut))%>%
+  ggplot()+
+  geom_bar(aes(x=protmut, fill=segment))+
+  plot.theme.date+
+  facet_wrap(~protein, scales="free", nrow=3)+
+  labs(x="Mutation of interest",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=4),
+        legend.position = c(0.8,0.15))
+ggsave(paste0(fig.out,"flumuts_by-protein_facet_mostfreq.png"),width = 12,height=8,units = "in")
+
+#Not faceted
+muts.all.long2 %>%
+  filter(genotype %in% c("B3.13","B3.2","B3.6")) %>%
+  filter(protmut %in% aprotmostfreqmut) %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  filter(!is.na(protmut))%>%
+  ggplot()+
+  geom_bar(aes(x=mut, fill=segment))+
+  plot.theme.date+
+  facet_wrap(~genotype, scales="free", nrow=3)+
+  labs(x="Mutation of interest",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=4),
+        legend.position = "top")+
+  guides(fill=guide_legend(nrow=1))
+ggsave(paste0(fig.out,"flumuts_by-protein_facet_mostfreq_genos.png"),
+       width = 12,height=7,units = "in")
+```
+
+## Bar plots with marker effects text
+```{r}
+#non-wild counts per mutation with one effect label per bar
+effect_counts<-function(dat, keep){
+  dat %>%
+    filter(protmut %in% keep) %>%
+    filter(! type %in% "wild") %>% #dont include wildtype residues
+    filter(!is.na(protmut)) %>%
+    count(protmut, protein, segment, mutation) %>%
+    left_join(mut.effects, by="mutation")
+}
+
+#lab = "effect_multi" or "effect_first"; flip = one column (horizontal bars and text) instead of one row
+plot_effect<-function(cnt, lab, flip=FALSE){
+  if(!flip){
+    cnt %>%
+      ggplot(aes(x=protmut, y=n))+
+      geom_col(aes(fill=segment))+
+      geom_text(aes(label=.data[[lab]], y=0), angle=90, size=2.5, hjust=0, na.rm=TRUE)+
+      plot.theme.date+
+      labs(x="Mutation",y="Count")+
+      scale_fill_manual(values=segment.cols)+
+      theme(axis.text.x = element_text(size=6),
+            legend.position = "top")+
+      guides(fill=guide_legend(nrow=1))
+  } else {
+    cnt %>%
+      ggplot(aes(y=protmut, x=n))+
+      geom_col(aes(fill=segment))+
+      geom_text(aes(label=.data[[lab]], x=0), size=2.5, hjust=0, na.rm=TRUE)+
+      plot.theme.date+
+      labs(y="Mutation",x="Count")+
+      scale_y_discrete(limits=rev)+ #PB2 at top
+      scale_fill_manual(values=segment.cols)+
+      theme(axis.text.y = element_text(size=6),
+            legend.position = "top")+
+      guides(fill=guide_legend(nrow=1))
+  }
+}
+
+#save one-row and one-column versions for multi and first effect labels
+save_effect_plots<-function(cnt, prefix, suffix=""){
+  nb<-nrow(cnt)
+  for (lab in c("effect_multi","effect_first")){
+    lab.nm<-str_replace(lab, "effect_", "effect")
+    ggsave(paste0(fig.out, prefix, "_onerow_", lab.nm, suffix, ".png"),
+           plot=plot_effect(cnt, lab),
+           width = max(6, nb*0.15+2), height=7, units = "in")
+    #width from longest label so multi-effect text isn't clipped (~0.045 in per char at size 2.5)
+    lab.w<-max(nchar(cnt[[lab]]), 0, na.rm=TRUE)
+    ggsave(paste0(fig.out, prefix, "_onecol_", lab.nm, suffix, ".png"),
+           plot=plot_effect(cnt, lab, flip=TRUE),
+           width = min(24, max(8, lab.w*0.045+3)), height=max(4, nb*0.15+2), units = "in")
+  }
+}
+
+#all mutations, most frequent (n>1000 non-wild, as above)
+eff.cnt<-effect_counts(muts.all.long2, aprotmostfreqmut)
+nrow(eff.cnt) #n bars
+save_effect_plots(eff.cnt, "flumuts_by-protein_mostfreq")
+```
+
+## Mammal and drug resistance mutations with effects text
+```{r}
+#mutations with a mammal- or drug-related marker effect
+mamm.drug.mut<-mut.effects$mutation[mut.effects$mammal | mut.effects$drug]
+min.mamm.drug<-1000 #min non-wild count to plot, same as all-mutation plots
+
+mdprotmuts.total<-muts.all.long2 %>%
+  filter(mutation %in% mamm.drug.mut) %>%
+  filter(! type %in% "wild") %>%
+  count(protmut)
+mdprotmostfreqmut<-as.character(mdprotmuts.total$protmut[mdprotmuts.total$n>min.mamm.drug])
+
+eff.cnt.md<-effect_counts(muts.all.long2, mdprotmostfreqmut)
+table(eff.cnt.md$marker_class)
+save_effect_plots(eff.cnt.md, "flumuts_by-protein_mostfreq", "_mamm-drug")
+
+#facet by marker class (mammal, drug, both)
+p.class<-eff.cnt.md %>%
+  plot_effect("effect_multi", flip=TRUE)+
+  facet_grid(marker_class~., scales="free_y", space="free_y")+
+  theme(strip.text.y = element_text(angle=0))
+ggsave(paste0(fig.out,"flumuts_by-protein_mostfreq_onecol_effectmulti_mamm-drug_class.png"),
+       plot=p.class, width = min(24, max(8, max(nchar(eff.cnt.md$effect_multi), 0, na.rm=TRUE)*0.045+4)), height=max(4, nrow(eff.cnt.md)*0.15+2.5), units = "in")
+
+#all called mutations (no min count), one row per protein:mutation - also input for genome_map_mutations.R
+#n = non-wild count, 0 if only wild; mutations not called in the data (e.g. dropped K627E) excluded
+all.n<-muts.all.long2 %>%
+  filter(! type %in% "wild") %>%
+  count(mutation)
+mut.summary<-muts.all.long2 %>%
+  distinct(mutation, protmut, protein, segment, mut.pos) %>%
+  left_join(all.n, by="mutation") %>%
+  mutate(n=replace_na(n, 0L)) %>%
+  left_join(mut.effects, by="mutation") %>%
+  arrange(protmut)
+write.csv(mut.summary, paste0(f.out, "mut_effects_all.csv"), row.names = F)
+
+#mammal/drug only
+mut.summary %>%
+  filter(mutation %in% mamm.drug.mut) %>%
+  arrange(marker_class, protmut) %>%
+  select(protmut, protein, segment, marker_class, n, effect_multi, n_effects, combo_only, markers) %>%
+  write.csv(paste0(f.out, "mut_effects_mamm-drug.csv"), row.names = F)
+```
+
+## Count unique mutations by protein
+```{r}
+#protein from mutation col name, NS split into NS1/NS2 (e.g. "NS.1.P3S" -> NS1, "HA1.5.S107R" -> HA1)
+mut_to_prot<-function(mutation){
+  prot<-str_extract(mutation, "^[^.]+")
+  sub<-str_match(mutation, "^[^.]+\\.(\\d+)\\.")[,2]
+  ifelse(prot == "NS", paste0("NS", sub), prot)
+}
+prot.ns.ord<-c("PB2","PB1","PB1-F2","PA","NP","HA1","HA2","NA","M1","M2","NS1","NS2")
+
+called.muts<-unique(muts.all.long2$mutation)
+mut.counts<-tibble(mutation=flumut.muts) %>%
+  mutate(protein=mut_to_prot(mutation),
+         called=mutation %in% called.muts, #excludes dropped K627E and never-called
+         mamm_drug=called & mutation %in% mamm.drug.mut) %>%
+  group_by(protein) %>%
+  summarise(n_flumut=n(),
+            n_called=sum(called),
+            n_mamm_drug=sum(mamm_drug),
+            .groups = "drop") %>%
+  mutate(protein=factor(protein, levels=prot.ns.ord)) %>%
+  arrange(protein) %>%
+  mutate(protein=as.character(protein))
+mut.counts<-mut.counts %>%
+  bind_rows(mut.counts %>% summarise(across(starts_with("n_"), sum)) %>% mutate(protein="Total"))
+mut.counts
+
+write.csv(mut.counts, paste0(f.out, "mut_counts_by_protein.csv"), row.names = F)
+```
+
+## Cattle flumuts
+```{r}
+## Repeat cattle only
+muts.all.long2 %>%
+  filter(host == "Cattle") %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  ggplot()+
+  geom_bar(aes(x=mut, fill=segment))+
+  plot.theme.date+
+  facet_wrap(~protein, scales="free", nrow=3)+
+  labs(x="Mutation of interest",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=4),
+        legend.position = c(0.8,0.15))
+ggsave(paste0(fig.out,"cattle_flumuts_by-protein_facet.png"),width = 14,height=8,units = "in")
+
+## Repeat cattle only, most freq
+muts.total<-muts.all.long2 %>%   filter(host == "Cattle") %>% filter(! type %in% "wild") %>%  count(mut)
+mostfreq<-muts.total %>% filter(n>100) %>% select (mut)
+mostfreqmut<-as.character(mostfreq$mut )
+#protmuts
+protmuts.total<-muts.all.long2 %>%   filter(host == "Cattle") %>% filter(! type %in% "wild") %>%  count(protmut)
+protmostfreq<-protmuts.total %>% filter(n>100) %>% select (protmut)
+protmostfreqmut<-as.character(protmostfreq$protmut )
+
+muts.all.long2 %>%
+  filter(protmut %in% protmostfreqmut) %>%
+  filter(host == "Cattle") %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  ggplot()+
+  geom_bar(aes(x=mut, fill=segment))+
+  plot.theme.date+
+  facet_wrap(~protein, scales="free_x")+
+  labs(x="Mutation of interest [n>100 in cattle]",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=4),
+        legend.position = c(0.8,0.15))
+ggsave(paste0(fig.out,"cattle_flumuts_by-protein_facet_mostfreq.png"),width = 14,height=8,units = "in")
+
+#Remove facet and use the longer labels
+muts.all.long2 %>%
+  filter(protmut %in% protmostfreqmut) %>%
+  filter(host == "Cattle") %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  filter(!is.na(protmut)) %>%
+  ggplot()+
+  geom_bar(aes(x=protmut, fill=segment))+
+  plot.theme.date+
+  labs(x="Mutation of interest [n>100 in cattle]",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=6))
+ggsave(paste0(fig.out,"cattle_flumuts_by-protein_mostfreq.png"),width = 10,height=4,units = "in")
+```
+
+## B3.13 muts
+```{r}
+#Remove facet and use the longer labels B3.13
+muts.all.long2 %>%
+  filter(protmut %in% protmostfreqmut) %>%
+  filter(genotype == "B3.13") %>%
+  # filter(host == "Cattle") %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  filter(!is.na(protmut)) %>%
+  ggplot()+
+  geom_bar(aes(x=protmut, fill=segment))+
+  plot.theme.date+
+  labs(x="Mutation of interest",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=6))+
+  facet_wrap(~genotype)
+ggsave(paste0(fig.out,"flumuts_by-protein_mostfreqB3.13.png"),width = 10,height=4,units = "in")
+
+
+
+
+#Remove facet and use the longer labels D1.1
+muts.all.long2 %>%
+  filter(protmut %in% protmostfreqmut) %>%
+  filter(genotype == "D1.1") %>%
+  # filter(host == "Cattle") %>%
+  filter(! type %in% "wild") %>% #dont include wildtype residues
+  filter(!is.na(protmut)) %>%
+  ggplot()+
+  geom_bar(aes(x=protmut, fill=segment))+
+  plot.theme.date+
+  labs(x="Mutation of interest",y="Count")+
+  scale_fill_manual(values=segment.cols)+
+  theme(axis.text.x = element_text(size=6))+
+  facet_wrap(~genotype)
+ggsave(paste0(fig.out,"flumuts_by-protein_mostfreqD1.1.png"),width = 10,height=4,units = "in")
+
+```
+
+# Graph separately and color by residue, excluding wildtype
+## read in amino abbrevs and prep for plot
+```{r}
+amino<-read.csv(amino.in)
+amino.ord<-amino$single_letter_aa
+amino.ord<-c(amino.ord, c("-","?","*"))
+#add extra for mixtures, deletions, ambig
+extra<-which(!muts.all.long2$residue %in% amino.ord)
+extra.res<-muts.all.long2$residue[extra] %>% unique #note full dataset now has 81 extra mixtures and
+
+#make mixtures their own type (wild, mut_prim, mut_sec, mixture)
+mix<-which(muts.all.long2$residue %in% extra.res)
+muts.all.long2$type[mix]<-"mixture"
+table(muts.all.long2$type)
+
+#color scheme for single aa first
+amino.cols<-natparks.pals(name="Volcanoes", n=length(amino.ord))
+names(amino.cols)<-amino.ord
+
+#now for mixtures and special chars
+extra.cols<-natparks.pals(name="Yosemite", n=length(extra.res))
+names(extra.cols)<-extra.res
+
+# amino.cols
+# extra.cols
+amino.cols.all<-c(amino.cols, extra.cols)
+amino.ord.all<-c(amino.ord, extra.res)
+
+#order nicely
+muts.all.long2$residue<-factor(muts.all.long2$residue,levels=amino.ord.all)
+```
+
+
+## Plots of residues across mutations
+```{r}
+#residue plot per protein, saved to figures/{PROT}/
+#types: residue = all incl wild, NonWildResidue = mut_prim+mut_sec+mixture, PrimaryResidue = mut_prim
+plot_residue<-function(dat, prot, types, file.nm, xlab="Mutation of interest"){
+  df<- dat %>%
+    filter(protein == prot) %>%
+    filter(type %in% types)
+  ll<-length(unique(df$residue))
+  #number of legend cols depends on n unique cats
+  ncoll<-ceiling(ll/15) #20 rows max
+  p<-df %>%
+    ggplot()+
+      geom_bar(aes(x=mut, group=residue, fill=residue), position = "stack")+
+      plot.theme.date+
+      labs(x=xlab,y="Count")+
+      scale_fill_manual(values=amino.cols.all)+
+      ggtitle(prot)+
+    guides(fill=guide_legend(position = "right",ncol = ncoll, direction = "vertical",
+                             override.aes = list(size=1)))
+  mut.p<-ords.df %>%
+    filter(protein == prot) %>% count() %>% as.numeric
+  ww.p<-ceiling(sqrt(mut.p))+ncoll+1
+  hh.p<-5
+  ggsave(file.path(fig.out, prot, file.nm), plot=p, width = ww.p,height=hh.p,units = "in")
+}
+
+all.types<-c("wild","mut_prim","mut_sec","mixture")
+for (i in 1:n.prot){
+  prot<-protein.ord[i]
+  plot_residue(muts.all.long2, prot, all.types,
+               paste0("flumuts_",prot,"_residue.png"))
+  plot_residue(muts.all.long2, prot, setdiff(all.types, "wild"),
+               paste0("flumuts_",prot,"_NonWildResidue.png"))
+  plot_residue(muts.all.long2, prot, "mut_prim",
+               paste0("flumuts_",prot,"_PrimaryResidue.png"))
+}
+```
+
+
+## CATTLE plots of residues across mutations
+```{r}
+muts.cattle<-muts.all.long2 %>% filter(host == "Cattle")
+for (i in 1:n.prot){
+  prot<-protein.ord[i]
+  plot_residue(muts.cattle, prot, all.types,
+               paste0("cattle_flumuts_",prot,"_residue.png"))
+  plot_residue(muts.cattle, prot, setdiff(all.types, "wild"),
+               paste0("cattle_flumuts_",prot,"_NonWildResidue.png"))
+  plot_residue(muts.cattle, prot, "mut_prim",
+               paste0("cattle_flumuts_",prot,"_PrimaryResidue.png"))
+}
+rm(muts.cattle)
+```
+
+
+## plot proportion prev of mutatins
+```{r}
+#Proportion of all in that prot with mutant residue
+propmut<-muts.all.long2 %>% 
+  # filter( type %in% "mut_prim") %>% #only map single primary res
+  group_by(protein, mut, type) %>% count()
+
+propmut2<-muts.all.long2 %>% 
+  dplyr::group_by(protein) %>% 
+  dplyr::summarise(tot=length(unique(sample_flu)))
+
+propmut3<-left_join(propmut, propmut2, by = "protein")
+propmut3<-propmut3 %>% mutate("prop.mut.type"=n/tot)
+
+#order nicely
+propmut3$mut<-factor(propmut3$mut,levels=mut.ords)
+
+#4 types incl mixture, fixed names so colors match across plots (wild last in orange, others blues)
+type.cols<-natparks.pals(name="Arches",n=9)[c(1,3,4,6)]
+names(type.cols)<-sort(all.types)
+i=1
+for (i in 1:n.prot){
+  df<-propmut3 %>% filter(protein == protein.ord[i])
+  #number of legend cols depends on n unique cats
+  ll<-length(unique(df$mut))
+  ncoll<-ceiling(ll/15) #20 rows max
+  df %>%
+    ggplot()+
+      geom_bar(aes(x=mut, y=prop.mut.type, group=type, fill=type), 
+               stat="identity", position = "stack")+
+      plot.theme.date+
+      labs(x="Mutation of interest",y="Proportion")+
+      scale_fill_manual(values=type.cols)+
+      ggtitle(protein.ord[i])
+  mut.p<-ords.df %>%
+    filter(protein == protein.ord[i]) %>% count() %>% as.numeric
+  ww.p<-ceiling(sqrt(mut.p))+ncoll+1
+  hh.p<-5
+  ggsave(file.path(fig.out,protein.ord[i],paste0("flumuts_",protein.ord[i],"_Proportion_WildPrimSecondMut.png")),width = ww.p,height=hh.p,units = "in")
+}
+
+#Again, as counts by type - to show where data is incomplete within a protein
+for (i in 1:n.prot){
+  ll<-length(unique(propmut3$mut[propmut3$protein == protein.ord[i]] ))
+  ncoll<-ceiling(ll/15) #20 rows max
+  propmut3 %>%
+    filter(protein == protein.ord[i]) %>%
+    ggplot()+
+      geom_bar(aes(x=mut, y=n, group=type, fill=type), 
+               stat="identity", position = "stack")+
+      plot.theme.date+
+      labs(x="Mutation of interest",y="Count")+
+      scale_fill_manual(values=type.cols)+
+      ggtitle(protein.ord[i])
+  mut.p<-ords.df %>%
+    filter(protein == protein.ord[i]) %>% count() %>% as.numeric
+  ww.p<-round(sqrt(mut.p))+ncoll+1
+  hh.p<-4
+  ggsave(file.path(fig.out,protein.ord[i],paste0("flumuts_",protein.ord[i],"_Count_WildPrimSecondMut.png")),width = ww.p,height=hh.p,units = "in")
+}
+```
+
+## cattle plot proportion prev of mutatins
+```{r}
+#Proportion of all in that prot with mutant residue
+propmutcatt<-muts.all.long2 %>% 
+  filter(host=="Cattle") %>% #only map single primary res
+  group_by(protein, mut, type) %>% count()
+
+propmut2catt<-muts.all.long2 %>% 
+  filter(host=="Cattle") %>% 
+  dplyr::group_by(protein) %>% 
+  dplyr::summarise(tot=length(unique(sample_flu)))
+
+propmut3catt<-left_join(propmutcatt, propmut2catt, by = "protein")
+propmut3catt<-propmut3catt %>% mutate("prop.mut.type"=n/tot)
+
+#order nicely
+propmut3catt$mut<-factor(propmut3catt$mut,levels=mut.ords)
+i=1
+for (i in 1:n.prot){
+  df<-propmut3catt %>% filter(protein == protein.ord[i])
+  #number of legend cols depends on n unique cats
+  ll<-length(unique(df$mut))
+  ncoll<-ceiling(ll/15) #20 rows max
+  df %>%
+    ggplot()+
+      geom_bar(aes(x=mut, y=prop.mut.type, group=type, fill=type), 
+               stat="identity", position = "stack")+
+      plot.theme.date+
+      labs(x="Mutation of interest, cattle",y="Proportion")+
+      scale_fill_manual(values=type.cols)+
+      ggtitle(protein.ord[i])
+  mut.p<-ords.df %>%
+    filter(protein == protein.ord[i]) %>% count() %>% as.numeric
+  ww.p<-ceiling(sqrt(mut.p))+ncoll+1
+  hh.p<-5
+  ggsave(file.path(fig.out,protein.ord[i],paste0("cattle_flumuts_",protein.ord[i],"_Proportion_WildPrimSecondMut.png")),width = ww.p,height=hh.p,units = "in")
+}
+```
+
+# EXPORT muts
+## join the original sample names from the og meta
+```{r}
+meta.og<-replicate(n=l.seg, vector())
+# join the original sample based on sample_flu
+for (i in 1:l.seg){
+  meta.og[[i]]<-read.csv(meta2.in[i])
+}
+meta.og.all<-bind_rows(meta.og)
+
+#try to match using seq_new
+all(meta.all$seq_new %in% meta.og.all$seq_new) #YES
+
+#restrict the meta.og to columns needed
+meta.og.all<-meta.og.all %>% select(seq_new, sample)
+# all(meta.all$sample==meta.all$sample_flu)
+meta.all<-meta.all %>% select (-sample)
+#join by seq new with og sample names
+meta.all<-meta.all %>% left_join(meta.og.all, by="seq_new")
+
+#CHECK then JOIN to muts
+all(meta.all$sample_flu %in% muts.all.long2$sample_flu)
+muts.all.long2<-muts.all.long2 %>% select(-sample)
+meta.all.less<-meta.all %>% select(sample_flu, sample) %>% distinct(sample_flu, .keep_all = TRUE)
+muts.all.long2<-muts.all.long2 %>% left_join (meta.all.less, by="sample_flu")
+#CHECK workd
+all(muts.all.long2$sample %in% meta.og.all$sample) ## YESSS
+```
+
+## export full tables (by segment below)
+```{r}
+#full mut list with types
+# write.csv(muts.all.long2, file=mut.long.out) 
+```
+
+# export muts incl original sample (not sample_flu) and by segment
+```{r}
+# group by segment in a list
+muts_long_seg<-muts.all.long2 %>%
+  group_by(segment) %>%
+  group_split(.keep = TRUE)
+
+names(muts_long_seg)<-muts.all.long2%>%
+  group_by(segment) %>%
+  group_keys() %>%
+  pull(segment)
+
+# reorder alphabetical like everything else
+muts_long_seg<-muts_long_seg[segments.ms]
+all(muts_long_seg[[1]]$sample %in% meta.og.all$sample)
+
+iwalk(muts_long_seg, ~ {
+  if (!is.null(.x))
+    write_csv(.x, file.path(f.out, paste0(.y, "_flumuts.csv"))) })
+```
+
+## Make wide by segment
+```{r}
+long_to_wide_seg<-function(dat) {
+  mut.summ<-dat %>%
+    unite(protein_mut, protein, mut, sep = ":", remove = FALSE) %>%
+    select(sample, protein_mut, type, residue)
+  # residue wide (if dups, keep unique values collapsed with ;)
+  mut.summ2<-mut.summ %>%
+    select(-type) %>%
+    group_by(sample, protein_mut) %>%
+    summarise(residue = paste(unique(residue), collapse = ";"), .groups = "drop") %>%
+    pivot_wider(names_from = protein_mut, values_from = residue)
+
+  # type wide (same treatment)
+  mut.summ3<-mut.summ %>%
+    select(-residue) %>%
+    group_by(sample, protein_mut) %>%
+    summarise(type = paste(unique(type), collapse = ";"), .groups = "drop") %>%
+    pivot_wider(names_from = protein_mut, values_from = type)
+  colnames(mut.summ3)[-1]<-paste0(colnames(mut.summ3)[-1], "_type")
+  left_join(mut.summ2, mut.summ3, by = "sample")
+}
+
+muts_wide_seg<-imap(muts_long_seg, ~ long_to_wide_seg(.x))
+
+#CHECK NAs (missing or ambig or wildtype?)
+w <- muts_wide_seg[["HA"]]  # pick a segment
+c(n_samples = nrow(w),
+  frac_any_na = mean(rowSums(is.na(w[,-1])) > 0),
+  frac_cols_with_na = mean(colSums(is.na(w[,-1])) > 0) )
+```
+
+## Rename colnames with feature type and add a binarized set
+```{r}
+add_flumut_renames_and_bin <- function(wide_df) {
+  stopifnot("sample" %in% names(wide_df))
+  nm <- names(wide_df)
+  type_cols_old <- nm[str_detect(nm, "(_type$|type$)")]
+  res_cols_old  <- setdiff(nm, c("sample", type_cols_old))
+  base_feat <- function(x) str_replace(x, "(_type$|type$)", "")
+  # rename() wants: new = old  (names = new, values = old)
+  res_map <- setNames(res_cols_old, paste0("flumut-res_", res_cols_old))
+  type_map <- setNames(type_cols_old, paste0("flumut-type_", base_feat(type_cols_old)))
+
+  out <- wide_df %>%
+    rename(!!!res_map) %>%
+    rename(!!!type_map)
+  type_cols <- names(out)[startsWith(names(out), "flumut-type_")]
+  out %>%
+    mutate(
+      across(
+        all_of(type_cols),
+        ~ case_when(
+            is.na(.) ~ NA_integer_,
+            . %in% c("mut_prim", "mut_sec", "mixture") ~ 1L, #mixture was mut_sec before v10, keep same binary
+            . == "wild" ~ 0L,
+            TRUE ~ NA_integer_
+          ),
+        .names = "flumut-bin_{str_replace(.col, '^flumut-type_', '')}"
+      )
+    )
+}
+
+muts_wide_seg2 <- imap(muts_wide_seg, ~ add_flumut_renames_and_bin(.x))
+# colnames(muts_wide_seg2[["HA"]])
+```
+
+# EXPORT wide df with binarize vars by seg
+```{r}
+purrr::iwalk(muts_wide_seg2, ~ {
+  readr::write_csv(.x, file.path(f.out, paste0(.y,"_muts_wide.csv")))
+})
+```
