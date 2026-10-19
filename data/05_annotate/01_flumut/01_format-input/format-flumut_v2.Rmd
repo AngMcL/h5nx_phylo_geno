@@ -1,0 +1,105 @@
+---
+title: "prep data for flumut"
+output: html_document
+date: "2025-04-10"
+---
+
+## objectives
+* format for flumut
+- sequences separated by segment with a common name for samples
+- smaller batches
+- MP not M for matrix
+
+* v2 change: don't temporal-outlier-filtered, ft_root_outlier. instead, use 04_clean-align output. Also, use sample in the seq_newflu
+
+## Libs
+```{r, message=F}
+library(Biostrings)
+library(tidyverse)
+library(gtools)
+library(ape)
+```
+
+## Ins and Outs
+```{r}
+f.nuc.in<-"../../../../04_clean-align/2026-01-12_clean_aligns_wg_out/cleaned_fasta/"
+f.met.in<-"../../../../04_clean-align/2026-01-12_clean_aligns_wg_out/cleaned_meta/"
+fasta.in<-list.files(f.nuc.in, pattern="nodup_nuc", full.names = T) %>% mixedsort()
+meta.in<-list.files(f.met.in, pattern="merged_cleaned_meta", full.names = T) %>% mixedsort()
+l.tre<-length(fasta.in)
+
+# Output
+today<-Sys.Date()
+f.out<-paste0(today,"_format_flumut/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+# all segments together, ordered by sample|date|segment
+#and batch exported in nseq=n.per.file per file
+n.per.file<-20000
+fasta.out<-paste0(f.out, "flumut_b") #add "<batch-number>.fasta"
+meta.out<-paste0(f.out, "meta_flumut_b") #add "<batch-number>.csv"
+```
+
+## Read in the trees, data
+```{r}
+nuc<-meta<-replicate(l.tre, vector())
+for(i in 1:l.tre){
+  meta[[i]]<-read.csv(file=meta.in[i],header=T)
+  nuc[[i]]<-Biostrings::readDNAStringSet(fasta.in[i])
+  #full match?
+  c(length(which(names(nuc[[i]]) %in% meta[[i]]$seq_new)),nrow(meta[[i]])) %>% print
+}
+
+## format names, replace in nuc
+for(i in 1:l.tre){
+  meta[[i]]$sample<-meta[[i]]$sample %>% 
+    str_replace_all(c("_|\\|"="-", #|\\(|\\)|\\/
+                      " "=""))
+  #flumut formatting requires sample-specific in name. REMOVE date
+  meta[[i]]<-meta[[i]] %>% unite(seq_newflu, 
+                                 "sample","segment",
+                                 sep="_", remove=F)
+  
+  #flumut formatting requires _, matrix to be MP not M, and no space
+  meta[[i]]$seq_newflu<-str_replace_all(meta[[i]]$seq_newflu, 
+                                        c("_M$"="_MP"))  
+  #replace in the fasta
+  names(nuc[[i]])<-meta[[i]]$seq_newflu [match(names(nuc[[i]]), meta[[i]]$seq_new)]
+}
+```
+
+## Export
+```{r}
+#bind them all together to export
+all.meta<-bind_rows(meta)
+all.nuc<-c(nuc[[1]], nuc[[2]], nuc[[3]], nuc[[4]],
+           nuc[[5]], nuc[[6]], nuc[[7]], nuc[[8]])
+length(all.nuc)==nrow(all.meta)
+
+#sort by names (group isolate names) and export in batches of 20,000
+all.meta<-all.meta %>% arrange(seq_newflu)
+all.nuc<-all.nuc[match(all.meta$seq_newflu, names(all.nuc))]
+
+#how many batches at n.per.file seq per file
+n.round<-ceiling(nrow(all.meta)/n.per.file)
+
+for (j in 1:n.round){
+  #Take successive 20,000 batches, match the fasta
+  rng<-c( ((j-1)*n.per.file)+1, (j*n.per.file) ) #c(1, n.per.file) etc
+  #for last one, upper will exceed what's available: change to last row index
+  if(j==n.round){rng[2]<-nrow(all.meta)}
+  temp.meta<-all.meta[(rng[1]:rng[2]), ]
+  write.csv(temp.meta, paste0(meta.out,j,".csv"))
+  temp.fasta<-all.nuc[which(names(all.nuc) %in% temp.meta$seq_newflu)]
+  writeXStringSet(temp.fasta, paste0(fasta.out, j, ".fasta"))
+}
+```
+
+## make a smaller test dataset
+```{r}
+# temp.meta<-all.meta[1:100, ]
+# write.csv(temp.meta, paste0(meta.out,"100test.csv"))
+# temp.fasta<-all.nuc[which(names(all.nuc) %in% temp.meta$seq_newflu)]
+# writeXStringSet(temp.fasta, paste0(fasta.out, "100test.fasta"))
+```
+
