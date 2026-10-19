@@ -1,0 +1,2255 @@
+---
+title: "clean ncbi data"
+output: github_document
+date: "2025-01-20"
+---
+
+## objectives
+* read in ncbi metadata for H5Nx sequences
+* remove vaccine, passaged, cloned
+* parse information from genbank titles incl species, location, year
+* fill in missing metadata with parsed information
+* for species (mix of common and latin), harmonize to common names
+* clean country, add continent, region
+* find mislabelled segments
+* remove rows with incomplete date, country, species, no HA
+* make a composite sample ID, remove duplicate segments within sample
+* read in ncbi fasta exclude meta removals from seqs
+* summary plots of ncbi nuc seqs by species/country/year, length of seqs
+* export cleaned unaligned seqs and metadata by segment
+* read in protein sequences
+* parse protein names, harmonize naming
+* match proteins to nucleotide samples
+* remove replicate protein seqs within sample
+* summary plots of proteins in final data
+
+# Setup 
+## libs
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r libs, message=FALSE}
+library(tidyverse)
+library(usa)
+library(maps) 
+library(Biostrings)
+library(NatParksPalettes)
+library(remotes)
+library(taxize)
+library(countrycode)
+library(purrr)
+```
+
+## data in and outs
+```{r}
+#INs
+data.fold<-"../download_ncbi/"
+#Metadata
+meta.in<-paste0(data.fold,"meta_sequences.csv")
+#nucleotide seqs/acc IDs
+nuc.in<-paste0(data.fold,"nucleotide_sequences.fasta")
+#coding regions/acc IDs
+cds.in<-paste0(data.fold,"coding_sequences.fasta")
+#protein seqs/acc IDs:
+prot.in<-paste0(data.fold,"protein_sequences.fasta")
+
+#LOOKup tables
+lookup.fold<-"lookups/"
+#prot/segment lookup
+prot.segment.look<-paste0(lookup.fold,"prot.nm.segment.csv")
+#china cities and regions
+china.cit.in<-paste0(lookup.fold,"cn.csv")
+#latin/common lookup
+latin.look.in<-paste0(lookup.fold,"latin-common.csv")
+#all unique hosts
+unqhost.in<-paste0(lookup.fold,"species_common_latin.csv")
+
+#OUTs
+today<-Sys.Date()
+f.out<-paste0("ncbi_out_",today,"/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+f.out.p<-paste0("ncbi_figs_",today,"/")
+if(!dir.exists(f.out.p)){dir.create(f.out.p)}
+
+#output for each segment
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+meta.out<-paste0(f.out,"ncbi_meta_",segments,".csv")
+nuc.out<-paste0(f.out,"ncbi_nuc_",segments,".fasta")
+
+#specify proteins out below
+#Write a log text file
+text.out<-paste0(f.out,today,"_logfile.txt")
+cat(paste0("Script ncbi_clean.Rmd run date: ",today),file=text.out,sep="\n",append = F)
+```
+
+## themes
+```{r}
+#plotting themes
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"),
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8))
+plot.theme.date<-plot.theme+
+  theme(axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+```
+
+# Clean meta and nucleotide sequences
+## read in metadata and inspect
+```{r}
+meta<-read.csv(meta.in)
+dim(meta) #174051     28
+
+#get rid of unnec columns, same for all (pub is 1,2,3)
+rem.col<-c("Species","Genus","Family","Molecule_type","Publications", "Org_location")
+meta<-meta %>% select(-all_of(rem.col))
+
+#rename genotype as subtype
+colnames(meta)<-str_replace_all(colnames(meta), "genotype","subtype")
+#lowercase
+colnames(meta)<-str_to_lower(colnames(meta))
+# table(meta$subtype)
+```
+
+## Check IDs 
+```{r}
+#How complete and unique are the different IDs?
+#unique accession? yes
+og.accession<-unique(meta$accession) 
+length(og.accession)==nrow(meta)
+cat(paste0("Meta nrows initial: ",length(og.accession)), file=text.out,sep="\n",append = T)
+
+#organism_name
+length(unique(meta$organism_name)) #6352
+# table(meta$organism_name) %>% sort(decreasing = T) %>% head # 144062 are just "Influenza A virus"
+# table(meta$organism_name[meta$organism_name!="Influenza A virus"]) %>% sort(decreasing = T) %>% head(n=3)
+# table(table(meta$organism_name)) %>% head(10) #4040 with 8 (common to sample/organism and 8 segs)
+# any(is.na(meta$organism_name)) #no na
+# which(meta$organism_name=="") #no
+
+#assembly
+length(unique(meta$assembly)) #23603, but could be multiples for a given sample
+# table(meta$assembly) %>% sort(decreasing = T) %>% head
+table(meta$assembly) %>% table #12827 have 8 so that's nice, but some assemblies have up to 32, 24, many 16. One has 14695? blank
+# names(table(meta$assembly)) [which(table(meta$assembly)==14695)] ""
+# meta$assembly %>% table %>% table #12700 have 8, 9600 NA 
+
+#genbank titles
+table(meta$genbank_title) %>% table #note not only dups, but up to 9 repeats
+dup.genbank<-meta$genbank_title [which(duplicated(meta$genbank_title))] 
+length(dup.genbank) #4639
+length(unique(meta$genbank_title)) # 169412, almost all unique but not quite
+
+#sra_accession
+table(table(meta$sra_accession)) #5134 have 8, 
+
+#isolate
+table(table(meta$isolate)) #14377 have 8,45578 missing
+# head(table(meta$isolate))
+
+#Biosample
+# length(unique(meta$biosample))
+table(table(meta$biosample)) #5221 have 8, 124636 NA
+# sort(table(meta$biosample),decreasing = T) %>% head(n=10) #1984 8, 106000 NA
+
+#rename these for future
+meta$genbank_title<-str_replace_all(meta$genbank_title,"setment|segment:","segment")
+meta$genbank_title<-str_replace_all(meta$genbank_title,"Viet Nam", "Vietnam")
+meta$country<-str_replace_all(meta$country,"Viet Nam", "Vietnam")
+meta$geo_location<-str_replace_all(meta$geo_location,"Viet Nam", "Vietnam")
+meta$organism_name<-str_replace_all(meta$organism_name, "Viet Nam", "Vietnam")
+
+#str detect this
+meta$geo_location_sml<-NA
+for(i in 1:nrow(meta)){
+  if(str_detect(meta$geo_location[i],"\\:"))
+  meta$geo_location_sml[i]<-(str_split(meta$geo_location[i],"\\:") %>% unlist() )[2] %>% trimws()
+}
+
+# Remove special chars
+char_baddies<-"\\%|\\$|\\&|\\*|\\@|\\!|\\#|\\~|\\>|\\<|\\^|\\[|\\]|\\{|\\}|,|:|;"
+meta$genbank_title<-str_replace_all(meta$genbank_title, char_baddies, "")
+```
+
+## Remove modified vaccine strains, passaged, cloned, escape mutants
+```{r}
+#Vaccine strains
+#1. resassorted vaccine strain NIBRG-14
+#https://www.sciencedirect.com/science/article/pii/S0264410X10000769
+rem.vacc<-meta$accession[str_which(meta$genbank_title, "NIBRG-14")]
+#not in the recent download where no vaccines specified
+
+#2. other non-modified (?) vaccine strains:
+#A/Indonesia/5/2005: https://www.nature.com/articles/s41467-024-55546-7
+#isolated from human throat swab: https://www.nejm.org/doi/full/10.1056/NEJMoa06093
+rem.vacc2<-meta$accession[str_which(meta$genbank_title, "A/Indonesia/5/2005")]
+#13 of these though
+
+# A/Vietnam/1203/2004: https://academic.oup.com/jid/article/198/5/635/865131 https://pmc.ncbi.nlm.nih.gov/articles/PMC3071280/
+#isolated from human:  https://pmc.ncbi.nlm.nih.gov/articles/PMC1212624
+rem.vacc3<-meta$accession[str_which(meta$genbank_title, "A/Vietnam/1203/2004")]
+
+#MDCK isolate embryonated chicken egg isolate? are these considered cultured? 
+# str_subset(meta$genbank_title,"MDCK")
+
+# https://www.ncbi.nlm.nih.gov/nuccore/DQ659324.1
+#these are viruses derived from whooping swan in mongolia
+rem.vacc4<-meta$accession[str_which(meta$genbank_title,"St Jude")]
+#not present in new data
+
+#Culture, clones, muts
+rem.cult<-meta$accession[str_which(meta$genbank_title,"passage|culture")] #cultured sample
+rem.clone<-meta$accession[str_which(meta$genbank_title,"clone")] #clones
+rem.mutant<-meta$accession[str_which(meta$genbank_title,"mutant")] #monoclonal antibody escape mutant
+
+#all removals
+l.rem.all.vacc<-sum(length(rem.vacc), length(rem.vacc2), length(rem.vacc3), length(rem.vacc4)) #29
+l.rem.all.vacc 
+
+length(rem.cult); length(rem.clone); length(rem.mutant); 
+
+rem.multi<-unique(c(rem.vacc, rem.vacc2, rem.vacc3, rem.vacc4, 
+                    rem.cult, rem.clone, rem.mutant))
+length(rem.multi) 
+
+#REMOVE them! 
+meta <- meta %>% filter(!accession %in% rem.multi)
+
+cat(paste0("Excluded, vaccines: ",length(c(rem.vacc,rem.vacc2,rem.vacc3,rem.vacc4))),
+    paste0("Excluded, cultured: ",length(rem.cult)),
+    paste0("Excluded, mutants: ",length(rem.mutant)),
+    paste0("Excluded, clones: ",length(rem.clone)),
+    paste0("Meta nrow after excl vaccines, cultured, clones, mutants: ",nrow(meta)), 
+    file=text.out,sep="\n",append = T)
+```
+
+## Inspect other variables
+```{r}
+# hosts
+# table(meta$host)%>%sort(decreasing = T) %>% head(n=10) #13414 no host. some in name.
+length(table(meta$host)) #421 unique species (some could be same, latin vs common, misspelled). 
+#unidentified bird...   13405 are missing 
+
+# segments
+meta$segment<-str_replace_all(meta$segment, "segment |RNA ", "")
+
+#later, will parse segment from name for missing and to check correct one used 
+meta$segment<-str_replace_all(meta$segment, c("^1"="PB2",
+                                              "^2"="PB1",
+                                              "3"="PA",
+                                              "4"="HA",
+                                              "5"="NP",
+                                              "6"="NA",
+                                              "7"="M",
+                                              "MA"="M", #some weirdos
+                                              "8"="NS"))
+table(meta$segment) #429 don't have anything - extract from strain in parse below
+
+# Geography
+# table(meta$USA) %>% sort(decreasing = T) %>% head()  #state abbr
+# table(meta$country)  %>% sort(decreasing = T) %>% head  #736 NA, but otherwsie good coverage
+# table(meta$geo_location) %>% sort(decreasing = T) %>% head
+# table(meta$Org_location) %>% sort(decreasing = T) %>% head  #redundant to country? (of sample origin vs lab seqing)
+
+#remove apostrophes (eg cote d'ivoire)
+meta$country<-str_replace_all(meta$country, "'", "")
+meta$geo_location<-str_replace_all(meta$geo_location, "'", "")
+
+## Dates
+#release date range
+range(meta$release_date) # "1998-02-05" "2025-12-07"
+meta$release_date<-as.Date(meta$release_date)
+
+#unfortunately collection date not as good #Parse below
+# range(meta$collection_date) #incomplete
+no.date<-which(meta$collection_date=="") #interestingly it is now complete, but wasn't in the first build
+length(no.date)
+# which(is.na(meta$collection_date)) #none are NA
+# meta$genbank_title[no.date] %>% head() #year here
+
+## subtypes
+table(meta$subtype)
+#where there is ?... retype the N (later after removing other problematics)
+
+## Gaps/completeness
+table(meta$nuc_completeness) #only  1937 (lower than last build) are complete... what is the threshold? based on length?
+#going to filter by >10% (?) gaps after alignment (do we trust these numbers? maybe no)
+meta.segment.length<-meta %>% group_by(segment) %>% 
+  summarize(min.length=min(length),
+            max.length=max(length),
+            threshold.length=max.length*0.8)
+meta.segment.length 
+
+## tissue source - should plot this out in the final summary (keep)
+table(meta$tissue_specimen_source) %>% sort(decreasing = T) %>% head() #61455 no data, 
+# unique(meta$tissue_specimen_source)
+#swab, mammalian milk most common, then oronasopharynx 
+```
+
+## Parse information from IDs
+```{r}
+#re-wrote this parsing function with help of chatgpt to utilize purrr instead of for loops over lists, and overall more efficient/less redundant
+
+#helper functions
+safe_first<-function(x,default=""){if(length(x)==0||all(is.na(x)))default else x[1]}
+safe_last<-function(x,default=""){if(length(x)==0||all(is.na(x)))default else x[length(x)]}
+empty_if_bad<-function(x){if(length(x)==0||all(is.na(x)))"" else x[1]}
+
+#location lookup list
+unq_loc<-meta[,c("country","geo_location_sml")]%>%unlist(use.names=FALSE)
+unq_loc<-unq_loc[!is.na(unq_loc)&unq_loc!=""]
+us.states<-usa::state.name
+china<-read.csv(china.cit.in)
+china.region<-unique(china$admin_name)
+cit<-maps::world.cities
+cities<-cit$name
+unq_loc<-unique(c(unq_loc,us.states,china.region,cities))
+unq_loc<-unq_loc[unq_loc!="Turkey"]
+
+#constants
+year_range<-1905:2025
+all.years<-paste(as.character(year_range),collapse="|")
+all.segments<-paste(paste0("^",segments,"$"),collapse="|")
+
+#segment patterns
+segment_patterns<-list(
+  PB2="segment 1|PB2|pb2|polymerase basic protein 2|polymerase basic 2|polymerase basic subunit 2",
+  PB1="segment 2|PB1|pb1|polymerase basic protein 1|polymerase basic 1|polymerase basic subunit 1",
+  PA ="segment 3|\\(PA\\)| PA |polymerase acid|polymerase acidic",
+  HA ="segment 4|\\(HA\\)| HA |\\(ha\\)| ha |hemagglutinin|haemagglutinin|hemmaglutinin|Hemagglutinin",
+  NP ="segment 5|NP|np|nucleocapsid|nucleoprotein|Nucleocapsid|Nucleoprotein",
+  `NA` ="segment 6|\\(NA\\)| NA |\\(na\\)| na |neuraminidase|Neuraminidase",
+  M  ="segment 7|\\(M\\)| M |\\(MA\\)| MA |matrix|Matrix|M1|M2",
+  NS ="segment 8|NS|ns|nonstructural protein|non-structural protein"
+)
+
+too.many<-c()
+why.strain<-c()
+
+#parser function
+parse_genbank_title<-function(t,unq_loc,all.years,all.segments,segment_patterns){
+  t_split<-str_split(t,"\\/")[[1]]
+  n_parts<-length(t_split)
+
+  #strain
+  strain_split<-str_split(t,
+    " segment| serotype| viral| polymerase| hemagglutinin| neuraminidase| nonstructural| non-structural| nucleoprotein| nucleocapsid| matrix| membrane| nuclear| - gene| -- gene| - HA gene| - NA gene| - PB2 gene| - PB1 gene| - PA gene| - M gene| - NP gene| - NS gene | gene"
+  )[[1]]
+  my_strain<-if(length(strain_split)>1)strain_split[1] else {why.strain<<-c(why.strain,t);""}
+
+  #host
+  my_host<-safe_first(t_split[2])
+  my_host<-str_to_sentence(my_host)
+  my_host<-str_replace_all(my_host,"R\\(","")
+  my_host<-empty_if_bad(my_host)
+  if(str_detect(my_host,"Reassortant")&&n_parts>=3){
+    my_host<-safe_last(str_split(t_split[3],"\\(")[[1]])
+  }
+  if(str_detect(my_host,"Hong Kong|Hong kong")&str_detect(t,"MDCK|Embryo"))my_host<-"Embryonated chicken egg"
+  if(str_detect(my_host,"Influenza a virus|Influenza A virus|Puerto Rico"))my_host<-""
+
+  #location
+  my_location<-if(n_parts>=3)t_split[n_parts-2] else ""
+  if(my_host%in%unq_loc){my_location<-my_host;my_host<-""}
+  if(my_location%in%c("chicken","duck","pigeon","Mallard","little cuckoo-dove")&n_parts>=2){
+    my_location<-t_split[n_parts-1]
+  }
+  if(str_detect(my_location," X | x "))my_location<-safe_first(str_split(my_location," X | x ")[[1]])
+  if(str_detect(my_location,paste(as.character(1950:2025),collapse="|"))&n_parts>=4){
+    my_location<-safe_last(str_split(t_split[n_parts-4],"\\(")[[1]])
+  }
+  if(str_detect(my_location,paste0("-",0:9,collapse="|"))){
+    my_location<-safe_first(str_split(my_location,paste0("-",0:9,collapse="|"))[[1]])
+  }
+  if(my_location=="7732")my_location<-"Ontario"
+  my_location<-empty_if_bad(my_location)
+
+  #date
+  t_paren<-t_split%>%str_split("\\(|\\)")%>%unlist()%>%trimws()
+  t_paren<-t_paren[t_paren!=""]
+  my_date<-str_subset(t_paren,all.years)
+  my_date<-str_replace_all(my_date," X A| Original| OR_IR","")
+  my_date<-str_split(my_date," ")%>%unlist()
+  my_date<-my_date[my_date%in%as.character(year_range)]
+  if(length(my_date)>1)my_date<-my_date[which.max(as.numeric(my_date))]
+  my_date<-empty_if_bad(my_date)
+
+  #subtype
+  my_genotemp<-str_split(str_subset(t_paren,"H5N")," |-_|_")%>%unlist()
+  my_subtype<-str_subset(my_genotemp,"H5N")
+  my_subtype<-str_replace_all(my_subtype,"5H|3H|2H","H")
+  my_subtype<-empty_if_bad(my_subtype)
+
+  #segment
+  last_chunk<-safe_last(t_split)
+  t_seg_parts<-str_split(last_chunk,"\\(|\\)| ")%>%unlist()%>%trimws()
+  my_geneseg<-str_subset(t_seg_parts,all.segments)
+  if(length(my_geneseg)==0){
+    for(seg in names(segment_patterns)){
+      if(str_detect(last_chunk,segment_patterns[[seg]])){my_geneseg<-seg;break}
+    }
+  }
+  my_geneseg<-empty_if_bad(my_geneseg)
+  if(length(my_geneseg)>1){
+    too.many<<-c(too.many,t)
+    my_geneseg<-my_geneseg[1]
+  }
+
+  list(
+    strain_parse=my_strain,
+    host_parse=my_host,
+    location_parse=my_location,
+    date_parse=my_date,
+    subtype_parse=my_subtype,
+    geneseg_parse=my_geneseg
+  )
+}
+
+#apply row parser
+parsed_list<-purrr::map(meta$genbank_title,
+  ~parse_genbank_title(.x,unq_loc,all.years,all.segments,segment_patterns)
+)
+
+parsed_df<-purrr::map_dfr(parsed_list,as.data.frame)
+meta<-dplyr::bind_cols(meta,parsed_df)
+
+#final host cleanup
+meta$host_parse<-meta$host_parse%>%trimws()%>%
+  str_replace_all("_"," ")%>%
+  str_to_sentence()%>%
+  str_replace_all("286cad|Puerto rico|Antarctica|Reverse genetic|Hong kong","")
+
+#keep only true subtypes H[0-9]+N[0-9]+
+meta$subtype_parse<-str_extract(meta$subtype_parse,"H[0-9]+N[0-9]+")
+meta$subtype_parse[is.na(meta$subtype_parse)]<-""
+# table(meta$subtype_parse)
+meta$subtype<-str_replace_all(meta$subtype, c("H5N\\?"="H5Nx",
+                                              "H5N2\\?"="H5Nx"))
+```
+
+## fill missing meta with parsed values and clean dates
+```{r}
+#change NA to "" where needed
+if(any(is.na(meta$segment)))meta$segment[is.na(meta$segment)]<-""
+if(any(is.na(meta$collection_date)))meta$collection_date[is.na(meta$collection_date)]<-""
+if(any(is.na(meta$host)))meta$host[is.na(meta$host)]<-""
+if(any(is.na(meta$geo_location)))meta$geo_location[is.na(meta$geo_location)]<-""
+if(any(is.na(meta$subtype)))meta$subtype[is.na(meta$subtype)]<-""
+
+#how bad to start (optional diagnostics)
+length(which(meta$collection_date==""))  #dates missing 0
+length(which(meta$segment==""))          #segments missing 429
+length(which(meta$host==""))             #hosts missing 7828
+length(which(meta$geo_location==""))     #locations missing 34
+length(which(meta$subtype==""))          #subtypes missing 0
+
+#create dup col for original host (usually latin names)
+meta$host_latin<-meta$host
+
+#by default, take the common name parsed from the strain
+meta$host<-meta$host_parse
+
+#vectorised data filling instead of row loop
+meta$collection_date<-ifelse(meta$collection_date=="",meta$date_parse,meta$collection_date)
+meta$segment<-ifelse(meta$segment=="",meta$geneseg_parse,meta$segment)
+meta$host<-ifelse(meta$host=="",meta$host_latin,meta$host) #take latin if common/parsed not available
+meta$geo_location<-ifelse(meta$geo_location=="",meta$location_parse,meta$geo_location)
+meta$subtype<-ifelse(meta$subtype=="",meta$subtype_parse,meta$subtype)
+
+#still missing dates?
+no.date<-which(meta$collection_date=="")
+length(no.date)  #for reference 0
+
+#build patterns for abbreviated + full years
+abb.yr<-c(
+  as.character(50:99),              #1950-1999 (two-digit)
+  paste0("0",0:9),                  #00-09 -> 2000-2009
+  paste0("1",0:9),                  #10-19 -> 2010-2019
+  as.character(1905:2025)           #full years
+)
+abb.years.s<-paste0("^(",paste(abb.yr,collapse="|"),")$")  #exact matches only
+
+#helper to extract and normalize a year from a title string
+extract_year_from_title<-function(tt){
+  s<-str_split(tt,"\\/|\\(| |_|-")[[1]]
+  my.yr<-str_subset(s,abb.years.s)
+  if(length(my.yr)==0)return("")
+  my.yr<-my.yr[length(my.yr)]  #if multiple, take later mentioned
+
+  if(my.yr%in%paste0("0",0:9))return(paste0("20",my.yr))   #2000-2009
+  if(my.yr%in%paste0("1",0:9))return(paste0("20",my.yr))   #2010-2019
+  if(my.yr%in%as.character(50:99))return(paste0("19",my.yr)) #1950-1999
+  if(my.yr%in%as.character(1905:2025))return(my.yr)        #already full year
+  ""
+}
+
+#apply to titles with missing dates (vectorised via vapply)
+titles_nd<-meta$genbank_title[no.date]
+year_fills<-vapply(titles_nd,extract_year_from_title,character(1))
+has_year<-year_fills!=""
+meta$collection_date[no.date[has_year]]<-year_fills[has_year]
+
+#manual corrections / known issues
+meta$collection_date<-str_replace_all(meta$collection_date,"1905-07-14","2022")
+meta$collection_date[str_which(meta$genbank_title,"2018X Puerto Rico/8/1934")]<-"2018"
+
+#remaining no-date accession IDs (if any)
+rem.date<-meta$accession[meta$collection_date==""]
+length(rem.date) #0 
+
+#disagreements?
+look<-meta [which(meta$subtype_parse!=meta$subtype), c('subtype_parse', 'subtype')]
+look %>% filter(subtype_parse!='') ##H5N2 that previously had ? (set as x)
+```
+
+```{r}
+meta.og<-meta #backup for any errors below
+```
+
+## Clean host further
+```{r}
+#ensure host not NA and basic cleanup
+meta$host[is.na(meta$host)]<-""
+
+meta$host<-str_replace_all(meta$host,
+  c(baddies="",#bad characters 
+    "_"=" ",
+    "Unknown| feces| fecal| cloacal| Cloacal|Feral |Backyard |Domestic |Mixed |Rural |Wild |Migratory |House |Juvenile | ^sp.$| ^spp.$| ^sp$| ^spp$| \\(em\\)"=""
+  ))
+
+#sentence case
+meta$host<-str_to_sentence(meta$host)
+
+#main spelling/normalization map
+# main unified lookup for host cleaning
+host_map<-c(
+  "Aalopochen aegyptiaca"="Alopochen aegyptiaca",
+  "African black oystercatcher"="African oystercatcher",
+  "African-jacana"="African jacana",
+  "Hoabara"="African hoabara",
+  "American-kestrel"="American kestrel",
+  "American pelican"="American white pelican",
+  "Anser brachyrhynchus anser anser|Pink footed goose"="Pink-footed goose",
+  "Aixnsa"="Wood duck",
+  "Arctic-fox"="Arctic fox",
+  "Artic"="Arctic",
+  "Beetle"="Darkling beetle",
+  "^Barnacle$"="Barnacle goose",
+  "Bikini ducks"="Duck",
+  "black-baked|black backed"="black-backed",
+  "Black headed|Black-headead"="Black-headed",
+  "Black nested grebe"="Black-necked grebe",
+  "Blue-winged and cinnamon teal"="Blue-winged teal",
+  "blue winged"="blue-winged",
+  "Bean goose\\(anser fabalis\\)"="Bean goose",
+  "Black bellied"="Black-bellied",
+  "Black crowned"="Black-crowned",
+  "Black faced"="Black-faced",
+  "Black legged"="Black-legged",
+  "Bk swan|Black-swan"="Black swan",
+  "Brown-head gull"="Brown-headed gull",
+  "Black-headed-gull|Black-headed seagull|Bl h gull"="Black-headed gull",
+  "Black necked-grebe"="Black-necked grebe",
+  "Blue winged"="Blue-winged",
+  "Barnswallow"="Barn swallow",
+  "Bar headed"="Bar-headed",
+  "Bar-headedgoose"="Bar-headed goose",
+  "Barrow s goldeneye"="Barrow's goldeneye",
+  "Brant$|Brent goose"="Brant goose",
+  "Broad winged"="Broad-winged",
+  "Brown headed gull"="Brown-headed gull",
+  "Bulbucus ibis"="Bubulcus ibis",
+  "Canade goose|Canadagoose|Greater canada goose"="Canada goose",
+  "^Canine"="Dog",
+  "Chukkar"="Chukar",
+  "Chimango caracara"="Chimango",
+  "^Chicken$|^Ck|^Ch$|Chciken|Chiken|^Chick$|Chicken-cobb|Layer-chicken|Village chicken|Breeder chicken$|Breeder-chicken$|Broiler breeders|Broilers|Broiler chicken$|Broiler-chicken$|Broiler$|Silky chicken|Silkie chicken|Gallus gallus domesticus|Gallus gallus$|Deshi chicken\\(gallus gallus domesticus\\)|Chicken\\(gallus gallus domesticus\\)|Brahma chicken|Layer chicken\\(gallus gallus domesticus\\)|Chicken-layer|Layer chicken|Water chicken|Layer$|Layer hen|Laying hens|Laying hen|Black chicken|Chichen|Korean native chicken|Poultry|Chicken hen|Hens$|Chicken breeders chicken|Taiwanese chicken|Rural laying hen|Sck$|^Gallus$|Commercial chicken|Chickenl|Buff orpington chicken|Sonali chicken|Laying hen$|^Hen$|Fancy chicken|Breeding hen|Laying-hen$|Hens egg$"="Chicken",
+  "Civet cat"="Civet",
+  "Common eiders"="Common eider",
+  "Commom teal"="Common teal",
+  "Commontern"="Common tern",
+  "Common-kestrel"="Common kestrel",
+  "Hill myna"="Common hill myna",
+  "Commonbuzzard|Common bussard"="Common buzzard",
+  "Cooperss |Cooper s |Coopers s |Coopers |Cooper |Cooper's  "="Cooper's ",
+  "Ccrow|Corvus corvus"="Crow",
+  "Cygnus-"="Cygnus ",
+  "Unidentified ducks|^Ducks$|Anade|Canard|Duck broiler|Breeder duck$|Decoy duck|^Dk$"="Duck",
+  "ducks"="duck",
+  "Dairy cow|Dairy cattle|Bovine"="Cattle",
+  "Double crested"="Double-crested",
+  "Dovekie"="Little auk",
+  "Environment sample|Environmental sample|Environmental|Env$|^Water$|^env$|Environment \\(em\\)| Environment (em)|Water sample|Surface swab|Multispecies|Enviroment"="Environment",
+  "Embrionated"="Embryonated",
+  "Eurasian-"="Eurasian ",
+  "Eurasian eagel owl"="Eurasian eagle owl",
+  "Eurasian collared-dove"="Eurasian collared dove",
+  "Eur wig$"="Eurasian wigeon",
+  "Sparrowhawk"="Eurasian sparrowhawk",
+  "Europian"="European",
+  "Europeanherringgull"="European herring gull",
+  "Falcated teal"="Falcated duck",
+  "^Feline$"="Cat",
+  "Franklins gull|Franklins gull"="Franklin's gull",
+  "Wildbird-fregata-magnificens"="Fregata magnificens",
+  "Geoffroys cat"="Geoffroy's cat",
+  "G c grebe"="Great crested grebe",
+  "Glaucous winged gull"="Glaucous-winged gull",
+  "golden eye"="goldeneye",
+  "^Gs$|^Go$|Geese|^Anser$"="Goose",
+  "Grey lag goose|Grey go$|Greygoose|$Anser anser^|Anser anser domesticus"="Greylag goose",
+  "geese"="goose",
+  "Great-white pelican"="Great white pelican",
+  "Green winged"="Green-winged",
+  "green winged"="green-winged",
+  "Green-winged-teal"="Green-winged teal",
+  "Guinea fowl$|Guineafowl-chicken$|Gf$"="Guineafowl",
+  "Gull1$|Gull10|Gull spp.|C gull$|Larus$"="Gull",
+  "Goshawk"="Eurasian goshawk",
+  "Grabe"="Grebe",
+  "Great-drested"="Great drested",
+  "black-hawk"="black hawk",
+  "Gr bk bd gull"="Great black-backed gull",
+  "Goosander|Merganser"="Common merganser",
+  "Great grabe$|Great grebe$|Great-drested grebe$|Great crested-grebe$|Great created grebe$"="Great crested grebe",
+  "Gys fulvus"="Gyps fulvus",
+  "Harris hawk|Harris-hawk|Harriss hawk"="Harris's hawk",
+  "Hartlaubs gull|Hartlaubs gul"="Hartlaub's gull",
+  "Harbour"="Harbor",
+  "Herons"="Heron",
+  "Hering gull|Herrin gull"="Herring gull",
+  "Ichtyaetus"="Ichthyaetus",
+  "ketrel"="kestrel",
+  "Kestelfalcon"="Kestrel falcon",
+  "Lady amhersts pheasant"="Lady amherst's pheasant",
+  "Larus michhaellis|Larus michaellis|Larus micahahellis"="Larus michahellis",
+  "L-bl-ba-gull"="Lesser black-backed gull",
+  "Little-owl"="Little owl",
+  "Large billed crow"="Large-billed crow",
+  "Littlecuckoo-dove"="Little cuckoo-dove",
+  "Long eared"="Long-eared",
+  "Piaya minuta"="Little cuckoo",
+  "Pied megpie"="Magpie",
+  "Zoo pelican"="Pelican",
+  "Peafowl cristatus"="Indian peafowl",
+  "Peregrine-falcon"="Peregrine falcon",
+  "porchard"="pochard",
+  "Pochard duck|Pochard$"="Common pochard",
+  "Rb pochard|Rosybilled pochard"="Rosy-billed pochard",
+  "Mallard duck|Wild bird\\(anas platyrhynchos\\)|Anas platyrhynchos platyrhynchos|Anas platyrhynchos|Mallard\\(anas platyrhynchos\\)|Bird\\(anas platyrhynchos\\)|Mallardduck|^Mal$|Mallard domesticus$|Mallard domesticus domesticus|Mallard domestica"="Mallard",
+  "Madarin duck"="Mandarin duck",
+  "Marine otter"="Sea otter",
+  "Madin-darby canine kidney \\(mdck\\)"="Mdck",  
+  "Mule-duck|Mulard duck"="Mule duck",
+  "Muscovy$|Mus dk|Muscovyduck"="Muscovy duck",
+  "Mute-swan|M swan|Muteswan"="Mute swan",
+  "night-heron"="night heron",
+  "Neovison vison"="Neogale vison",
+  "Shoveler$|Northernshoveler|Shoveller duck|Shoveller$"="Northern shoveler",
+  "Nothern gannet|Notherngannet|Northerngannet|Ngan"="Northern gannet",
+  "Northern pintail duck"="Northern pintail",
+  "Open-billed stork|Openbill stork|Open-bill stork$|Open-bill$|Open-billed$|Openbill$"="Asian Openbill",
+  "Oriental magpie-robin"="Oriental magpie robin",
+  "Ostriches \\(struthio camelus\\)"="Ostrich",
+  "Oyster catcher"="Oystercatcher",
+  "Pavo$"="Peafowl",
+  "Pekin-duck|Pekin duck"="Peking duck",
+  "Pelican occidentalis"="Brown pelican",
+  "Peregrine-falcon|Peregrine$|P falcon"="Peregrine falcon",
+  "Peruvean"="Peruvian",
+  "Ph$"="Phalacrocorax",
+  "Qu$|Qa$"="Quail",
+  "Raxorbill"="Razorbill",
+  "Red-fox"="Red fox",
+  "Red tailed"="Red-tailed",
+  "Rt-hawk"="Red-tailed hawk",
+  "Redhead$"="Redhead duck",
+  "Red necked"="Red-necked",
+  "Red-backed-hawk"="Red-backed hawk",
+  "Red shouldered"="Red-shouldered",
+  "Rossss goose|Rosss goose|Ross goose"="Ross's goose",
+  "Rough legged"="Rough-legged",
+  "Rubby shelduck"="Ruddy shelduck",
+  "Rural goose"="Goose",
+  "Sabines gull"="Sabine's gull",
+  "Sea gull|Seagull|C gull"="Gull",
+  "shearwaters"="shearwater",
+  "Short eared owl"="Short-eared owl",
+  "Short billed gull"="Short-billed gull",
+  "Sharp shinned hawk"="Sharp-shinned hawk",
+  "Southern elephant seal mirounga leonina"="Southern elephant seal",
+  "South american sea lion otaria flavescens"="South American sea lion",
+  "Spotbill duck|Spot billed duck"="Spot-billed duck",
+  "Swainsons hawk"="Swainson's hawk",
+  "Swans"="Swan",
+  "Towny owel"="Tawny owl",
+  "Thayers gull"="Thayer's gull",
+  "Turky"="Turkey",
+  "Turtledove"="Turtle dove",
+  "T dk"="Tufted duck",
+  "Wildbird-sula-nebouxii"="Sula nebouxii",
+  "^Bird$|Unidentified bird|Aves"="Unknown bird",
+  "Water fowl"="Waterfowl",
+  "Aquatic bird|Mixed domestic anatidae"="Waterbird",
+  "White-fronted goose\\(anser albifrons\\)"="White-fronted goose",
+  "White fronted|White front"="White-fronted",
+  "White winged"="White-winged",
+  "Whooperswan|Whooper swans"="Whooper swan",
+  "widgeon"="wigeon",
+  "Widgeon"="Wigeon",
+  "Wildduck|Broiler duck"="Duck",
+  "Yellow billed"="Yellow-billed",
+  "Yellow legged-gull|Yellow leggend-gull|Yellow-legged-gull"="Yellow-legged gull",
+  "whistling-duck"="whistling duck",
+  "White faced"="White-faced",
+  "White breasted"="White-breasted",
+  "White-tailed sea eagle|White tailed eagle|White-tiled eagle"="White-tailed eagle",
+  "White naped crane"="White-naped crane",
+  "Wildfowl"="Waterfowl",
+  "Withe-tiled eagle"="White-tiled eagle",
+  "^Wild-bird$|^Wildbird$|^Avian$|^Bird$|^Other avian$|Ornamental bird|^Emy$|Wild birds$|Mixed|G.h$|Eg$|^ bird$"="Unknown bird",
+
+  # merged from downstream patches (nuc.meta + later host patch)
+  "Homo sapiens"="Human",
+  "Aythya fuligula"="Tufted duck",
+  "Blach-headed gull"="Black-headed gull",
+  "Crowned crane zoo"="Grey crowned crane",
+  "Cormorants"="Cormorant",
+  "Cignus olor"="Mute swan",
+  "Cygnus olor"="Mute swan",
+  "Chlidonias hybrida"="Whiskered tern",
+  "Bonapartes gull"="Bonaparte's gull",
+  "Broiler breeders chicken"="Chicken",
+  "Burmeisters porpoise"="Burmeister's porpoise",
+  "Bufflehead duck"="Bufflehead",
+  "Chungungo"="Marine otter",
+  "Domestic ferret"="Ferret",
+  "Domestic goose"="Goose",
+  "Equine"="Horse",
+  "Eurasian eagle owl"="Eurasian eagle-owl",
+  "Guinea fowl-chicken"="Guineafowl",
+  "Gray"="Grey",
+  "Grey-crowned"="Grey crowned",
+  "Great black-hawk"="Great black hawk",
+  "Moscovy duck"="Muscovy duck",
+  "Nannopterum brasilianus"="Neotropic cormorant",
+  "Oriental magpie robin"="Oriental magpie-robin",
+  "Otus scops"="Eurasian scops owl",
+  "Owstons"="Owston's",
+  "Pica pica"="Common magpie",
+  "Eurasian magpie"="Common magpie",
+  "Blue magpie"="Red-billed blue magpie",
+  "Sterna hirundo"="Common tern",
+  "Streptopelia decaocto"="Eurasian collared-dove",
+  "Sula leucogaster"="Brown booby",
+  "Tyto alba"="Barn owl",
+  "Von schrencks bittern"="Von schrenck's bittern",
+  "american"="American",
+  "Anas crecca"="Common teal",
+  "Anas acuta"="'Northern pintail",
+  "Ardea alba"="Great egret",
+  "Aviafauna"="Unknown bird",
+  "Belcher gull"="Belcher's gull",
+  "Bubulcus ibis"="Cattle egret",
+  "collared-dove"="collared dove",
+  "Embryonated chicken egg"="Chicken",
+  "Gadwall duck"="Gadwall",
+  "Great-horned owl"="Great horned owl",
+  "Gulls$"="Gull",
+  "Hobby falcon"="Eurasian hobby",
+  "Houbara bustard"="African houbara",
+  "Kestral"="Kestrel",
+  "Kestrel falcon"="American kestrel",
+  "Kalji"="Kalij",
+  "Luscinia cyane"="Siberian blue robin",
+  "'Northern pintail"="Northern pintail",
+  "Otaria flavescens"="South American sea lion",
+  "Panthera leo"="Lion",
+  "Perigrine"="Peregrine",
+  "Pig$"="Swine",
+  "Squared-tailed nightjar"="Square-tailed nightjar",
+  "Tanuki"="Japanese racoon dog",
+  "White-tiled"="White-tailed",
+  "White-stork"="White stork",
+  "Geez"="Geese"
+)
+
+# apply unified map
+meta$host<-str_replace_all(meta$host,host_map)
+meta$host<-str_to_sentence(meta$host)
+meta$host<-str_replace_all(meta$host,
+  c("South american"="South American",
+    "South georgia"="South Georgia"))
+
+#fix "Est" hosts using isolate_name
+est.idx<-which(meta$host=="Est")
+if(length(est.idx)>0){
+  iso.parts<-str_split(meta$isolate_name[est.idx],"\\/")
+  host.x<-vapply(iso.parts,function(xx){
+    if(length(xx)<4)return("Est")  #fallback if isolate_name is weird
+    h<-str_to_sentence(xx[4])
+    if(h=="Eagle")h<-"Bald eagle"
+    if(h=="Henharrier")h<-"Hen harrier"
+    h
+  },character(1))
+  meta$host[est.idx]<-host.x
+}
+
+#manual accession overrides
+meta$host[meta$accession%in%c("MN648335.1","MN648336.1")]<-"Mallard"
+meta$host_latin[meta$accession%in%c("MN648335.1","MN648336.1")]<-"Anas platyrynchos"
+meta$host[meta$accession%in%c("MT025067.1","MT025068.1")]<-"Chinstrap penguin"
+
+#humans, eggs
+meta$host[meta$accession%in%c("AF296752.1",
+                              "EF541392.1","EF541392.1","EF512562.1",
+                              "KU311575.1","KU311576.1","KU311577.1")]<-"Human"
+meta$host[meta$accession%in%c("AB212051.1","AB212059.1")]<-"Embryonated chicken egg"
+
+#optional view
+#table(meta$host)%>%sort()
+
+#Change this
+#safely fix human cases mislabeled as "British columbia"
+if(all(c("host","host_latin")%in%names(meta))){
+  idx<-which(tolower(meta$host)=="british columbia" &
+             tolower(meta$host_latin)=="homo sapiens")
+  if(length(idx)>0){
+    meta$host[idx]<-"Human"
+  }
+}
+```
+
+## which hosts still have latin?
+```{r latin to comm, message=F}
+#find latin-looking host strings
+latinx_pat<-"us$|is$|is |ara$|ae$|ea$|ia$|um$|Anser|es$|yla$|ped$|vison$|iba$|aca$|ata$|tta$|ubo$|alis$|allus|vus|stela|gata|xii|xa|ax|buteo|Larus"
+latinx<-unique(str_subset(meta$host,latinx_pat))
+latinx<-latinx[-str_which(latinx,
+  "Alpaca|Mallard|-necked ibis|-eared|Multispecies|Munia|munia|Rhea|rhea|Ibis|ibis|hoabara"
+)]
+
+latinx1<-unique(unlist(str_split(latinx," ")))
+latin.all<-unique(c(latinx,latinx1))
+
+latin.still<-which(meta$host%in%latin.all)
+length(latin.still)
+
+latin.look.df<-data.frame(latin=unique(meta$host[latin.still]),stringsAsFactors=FALSE)
+
+latin.look.in<-"lookups/latin-common.csv"
+
+if(file.exists(latin.look.in)){
+  latin.look.df2<-read.csv(latin.look.in,stringsAsFactors=FALSE)
+  latin.look.df2<-latin.look.df2[,-1]
+  latin.look.df<-latin.look.df%>%left_join(latin.look.df2,by="latin")
+}else{
+  latin.look.df$common<-NA_character_
+}
+
+length(which(is.na(latin.look.df$common)))
+
+#query taxize only for missing common names
+missing_idx<-which(is.na(latin.look.df$common))
+if(length(missing_idx)>0){
+  for(i in missing_idx){
+    out<-taxize::sci2comm(latin.look.df$latin[i])%>%unlist()
+    if(length(out)>0)latin.look.df$common[i]<-str_to_sentence(out[1])
+  }
+}
+
+#manual fills for remaining NA
+na.comm<-which(is.na(latin.look.df$common))
+if(length(na.comm)>0){
+  latin.look.df$common[na.comm]<-str_replace_all(latin.look.df$latin[na.comm],
+    c("Aquila fasciata"="Bonelli's eagle",
+      "Anas poecilorhyncha"="Indian spot-billed duck",
+      "Phalacrocorax"="Cormorant",
+      "Columba palumbus"="Common wood pigeon",
+      "Larus canus"="Common gull",
+      "Ichthyaetus melanocephalus"="Mediterranean gull",
+      "Sula nebouxii"="Blue-footed booby",
+      "Domestic anatidae"="Duck",
+      "Domestic phasianidae"="Chicken",
+      "Larus marinus"="Great black-backed gull",
+      "Procellaria aequinoctialis"="Tropical shearwater",
+      "Sula leucogaster"="Red-footed booby",
+      "Thalasseus acuflavidus"="Inca tern",
+      "Calidris alba"="Sanderling",
+      "Strigidae"="Owl",
+      "Spatula querquedula"="Garganey",
+      "Fregata magnificens"="Magnificent frigatebird",
+      "Mergus"="Merganser",
+      "Nasua nasua"="South American coati",
+      "Pelecanus thagus"="Peruvian pelican",
+      "Pelecanus"="Pelican",
+      "Pelecanus occidentalis|Pelican occidentalis"="Brown pelican",
+      "Larus argentatus"="Herring gull")  )
+}
+
+#write lookup for reuse
+if(!dir.exists("lookups"))dir.create("lookups")
+write.csv(latin.look.df,"lookups/latin-common-v2.csv",row.names=FALSE)
+
+#now replace latin hosts in meta using a join rather than a per-row loop
+latin.map<-latin.look.df
+
+meta<-meta%>%
+  left_join(latin.map,by=c("host"="latin"))%>%
+  mutate(host=ifelse(!is.na(common),common,host))%>%
+  select(-common)
+
+#check
+length(unique(meta$host)) #495
+
+#Note that the GISAID script differs subtly here, these should be combined at some point
+```
+
+## write the common and latin name lookup
+```{r}
+#all common and latin names lookup
+if(file.exists(unqhost.in)){unqhost<-read.csv(unqhost.in)}
+
+#make a table of all unique species, if available, latin name
+if(!file.exists(unqhost.in)){
+  unqhost<-data.frame(common=unique(meta$host))
+  unqhost<-unqhost %>% left_join(latin.look.df,by="common")
+  nrow(unqhost) #481
+  for(i in 1:nrow(unqhost)){
+    if(is.na(unqhost$latin[i])){
+      out<-taxize::comm2sci(unqhost$common[i]) %>% unlist()
+      if(length(out)>0){unqhost$latin[i]<-str_to_sentence(out)}
+    }
+  }
+  #export and fill-in with manual lookups later (07_host)
+  write.csv(unqhost,unqhost.in)  }
+
+#Join on to meta at a later script/after gisaid merger
+# table(meta$host) %>% sort (decreasing = T) %>% head(n=10)
+```
+
+## Clean up country and location
+```{r}
+#safety: no NA in key fields
+meta$country[is.na(meta$country)]<-""
+meta$geo_location[is.na(meta$geo_location)]<-""
+
+#where is country missing where we have other location info?
+nocount<-which(meta$country=="")
+length(nocount)  #for reference
+
+#fix some specific geos first
+meta$geo_location[str_which(meta$genbank_title,"NIAH6-3-0019")]<-"Kamphaengphet"
+meta$geo_location<-str_replace_all(meta$geo_location,
+  c("HongKong"="Hong Kong",
+    "Singapore-Q"="Singapore",
+    "Pensylvania"="Pennsylvania",
+    "zz"="",
+    "unknown"="",
+    "64650"="Denmark"))
+
+#fill country from geo_location where missing
+nocount<-which(meta$country=="")
+if(length(nocount)>0){
+  mygeo<-meta$geo_location[nocount]
+
+  #USA: states or abbreviations
+  idx_us<-nocount[mygeo%in%c(us.states,states$abb)]
+  if(length(idx_us)>0)meta$country[idx_us]<-"USA"
+
+  #China: regions or cities from china table
+  idx_cn<-nocount[mygeo%in%c(china.region,unique(china$city))]
+  if(length(idx_cn)>0)meta$country[idx_cn]<-"China"
+
+  #other: match to world.cities by exact name (title-cased)
+  idx_rest<-nocount[meta$country[nocount]=="" & mygeo!=""]
+  if(length(idx_rest)>0){
+    geo_rest<-meta$geo_location[idx_rest]
+    nm_rest<-str_to_title(geo_rest)
+    m_city<-match(nm_rest,cit$name)
+    has_city<-which(!is.na(m_city))
+    if(length(has_city)>0){
+      meta$country[idx_rest[has_city]]<-cit$country.etc[m_city[has_city]]
+    }
+  }
+}
+
+#manual lookup table of remaining no country for specific geos
+nocount<-which(meta$country=="")
+if(length(nocount)>0){
+  meta$country[nocount]<-str_replace_all(meta$geo_location[nocount],
+    c("Denmark"="Denmark",
+      "Hokkaido"="Japan",
+      "Miyagi"="Japan",
+      "Scotland"="Scotland",
+      "Foehr"="Germany",
+      "Vietnam"="Vietnam",
+      "Thailand"="Thailand",
+      "Thailand-Suphanburi"="Thailand",
+      "Kamphaenphet"="Thailand",
+      "Kamphaengphet"="Thailand",
+      "Uthaithani"="Thailand",
+      "Nakornsawan"="Thailand",
+      "Nakhonsawan"="Thailand",
+      "Nakhonphanom"="Thailand",
+      "Suphanburi"="Thailand",
+      "Nongkhai"="Thailand",
+      "Sheyang"="China",
+      "SanJiang"="China",
+      "jiangsu"="China",
+      "yunnan"="China",
+      "Hong Kong"="Hong Kong",
+      "Huadong"="China",
+      "Syvash"="Ukraine",
+      "Krasnoozerskoe"="Russia",
+      "Suzdalka"="Russia",
+      "Prymorsky"="Russia",
+      "Hatay"="Turkey")
+  )
+}
+
+nocount<-which(meta$country=="")
+all(which(meta$country=="")==which(meta$geo_location==""))
+length(nocount)  #remaining with no country & no geo
+
+#countries that are actually states / cities / regions
+meta$country[meta$country%in%c(us.states,us.cities$country.etc,"Penn")]<-"USA"
+meta$country[meta$country%in%china.region]<-"China"
+
+#use world.cities where country is actually a city name
+cit2<-cit%>%filter(!name%in%cit$country.etc)
+idx_city<-which(meta$country%in%cit2$name)
+if(length(idx_city)>0){
+  meta$country[idx_city]<-cit2$country.etc[match(meta$country[idx_city],cit2$name)]
+}
+
+#some specific renames
+meta$country<-str_replace_all(meta$country,
+  c("Gaza"="Palestine",
+    "Jalisco"="Mexico")
+)
+
+#check turkey country vs species
+turk<-which(meta$country=="Turkey")
+
+#where country is Turkey but strain/organism name suggests elsewhere
+turkey.locations<-paste(
+  c(states$abb,
+    states$name,
+    "Suzdalka",
+    "Israel",
+    "Arabia",
+    "Saudi Arabia",
+    "SaudiArabia",
+    "California",
+    "^CA$",
+    "Wisconsin",
+    "Minnesota",
+    "North_Dakota",
+    "Ontario",
+    "BC",
+    "Ireland"), collapse="|")
+
+not.turk<-str_which(meta$organism_name[turk],turkey.locations)
+meta.notturk<-turk[not.turk]
+
+if(length(meta.notturk)>0){
+  for(i in meta.notturk){
+    parts<-unlist(str_split(meta$organism_name[i],"/"))
+    loc<-str_subset(parts,turkey.locations)
+    if(length(loc)==0)next
+    loc<-loc[1]
+    meta$location_parse[i]<-loc
+    meta$geo_location[i]<-loc
+    if(loc%in%c(us.states,"CA"))meta$country[i]<-"USA"
+    if(loc%in%c("Ontario","BC"))meta$country[i]<-"Canada"
+    if(loc%in%c("Arabia","Saudi Arabia","SaudiArabia"))meta$country[i]<-"Saudi Arabia"
+    if(loc%in%"Suzdalka")meta$country[i]<-"Russia"
+    if(loc%in%"Israel")meta$country[i]<-"Israel"
+    if(loc%in%"Ireland")meta$country[i]<-"Ireland"
+  }
+}
+
+#lookup continent and region
+dfc<-data.frame(country=unique(meta$country),stringsAsFactors=FALSE)
+dfc$continent<-countrycode(dfc$country,origin="country.name",destination="continent")
+dfc$region<-countrycode(dfc$country,origin="country.name",destination="region23")
+
+#add missing / special cases
+dfc[dfc$country%in%c("Antarctica","South Georgia and the South Sandwich Islands"),
+    c("region","continent")]<-"Antarctica"
+dfc$region[dfc$country=="Scotland"]<-"Northern Europe"
+dfc$continent[dfc$country=="Scotland"]<-"Europe"
+dfc$region<-str_replace(dfc$region,"Australia and New Zealand","Oceania")
+dfc$region<-str_replace(dfc$region,"Northern America","North America")
+
+table(dfc$continent)%>%sort()
+table(dfc$region)%>%sort()
+
+any(is.na(dfc$region))  #should be FALSE
+
+write.csv(dfc,paste0(lookup.fold,"country_continent.csv"),row.names=FALSE)
+
+#connect back to meta (multimatch expected)
+meta<-meta%>%left_join(dfc,by="country")
+```
+
+## remaining missing and check mismatches
+```{r}
+length(which(meta$segment==""))
+#write and BLAST if not 0
+
+# No host
+rem.host<-meta$accession[which(meta$host=="")] 
+length(rem.host) #135
+meta[which(meta$host==""),]
+
+#No geo or country
+rem.loc<-meta$accession[which(meta$geo_location=="")]
+length(rem.loc) #0! better than last time
+# meta$geo_location %>% table %>% sort
+any(is.na(meta$region))
+
+#subtype complete although some ? 
+length(which(meta$subtype=="")) #0
+length(which(meta$subtype=="H5Nx")) #42
+# table(meta$subtype)
+
+# remove seqs with no date, host, or location
+length(rem.date); length(rem.host); length(rem.loc)
+rem.multi2<-unique(c(rem.date,rem.host,rem.loc))
+length(rem.multi2)
+  
+meta<-meta %>% 
+  filter(!accession %in% c(rem.date, rem.host, rem.loc))
+nrow(meta) #172710
+
+cat(paste0("Excluded, no date: ",length(rem.date)),
+    paste0("Excluded, no host: ",length(rem.host)),
+    paste0("Excluded, no location: ",length(rem.loc)),
+    paste0("Excluded, no date/host/location: ",length(rem.multi2)),
+    file=text.out,sep="\n",append = T)
+```
+
+## Mismatches of segment
+```{r}
+#not the same for a few, but pretty close
+table(meta$segment, meta$geneseg_parse)
+mismatch<-which(meta$segment != meta$geneseg_parse &
+                  meta$geneseg_parse != "")
+length(mismatch) #5
+right.ones<-str_which(meta$genbank_title[mismatch],"segment 2 polymerase PB2 \\(PB1\\)") #length 2
+meta[mismatch[-right.ones], c("segment","geneseg_parse","genbank_title")]
+#3 of these, and they are the parsed one if we trust the title
+
+# meta[mismatch[-right.ones], c("segment","geneseg_parse","genbank_title")]
+#after manually comparing, the column in meta was wrong (parsed right) for all except right.ones
+if(length(mismatch[-right.ones])>0){
+  meta$segment[mismatch[-right.ones]]<-meta$geneseg_parse[mismatch[-right.ones]] }
+table(meta$segment, meta$geneseg_parse) # nice all good except for the two we allowed manually (rightones) 
+
+cat(paste0("N Wrong segment: ",length(mismatch[-right.ones])),
+    file=text.out,sep="\n",append = T)
+```
+
+## Make a composite 'sample' ID for viruses
+```{r}
+#accession is unique for segment sequences, but no complete 'sample' column
+#make a unique viral sample must have the same isolate , biosample , sra , strain
+#Concatenate unique virus ID for seqs that are same for all: isolate/sample/sra acc/parsed strain 
+meta<-meta %>% unite(col=sample, isolate, biosample, sra_accession, strain_parse, sep="_", remove=FALSE)
+
+#baddies
+meta$sample<-str_replace_all(meta$sample, char_baddies,"")
+
+#somegenes snuck in there in isolate and strain parse:
+meta$sample<-str_replace_all(meta$sample, 
+                             paste(c(paste0("_",1:8,"_"),
+                                     paste0("_",1:8,"\\/"),
+                                     paste0("-",1:8,"_"),
+                                     paste0("-",1:8,"\\/"),
+                                     paste0(segments,"_",1:8),
+                                     paste0(segments,"-",1:8),
+                                     segments),  collapse = "|"), "-")
+meta$sample<-str_replace_all(meta$sample,c("___|__"="_",
+                                           "----|---|--"="-",
+                                            "-_|_-|--"="_",
+                                           "^_|^-"="",
+                                           " "="")) 
+length(unique(meta$sample)) #25222
+
+# head(meta$sample)
+df.temp<-table(table(meta$sample)) %>% as.data.frame()
+df.temp$Var1<-as.numeric(df.temp$Var1)
+sum(df.temp$Freq[df.temp$Var1==8]) #18691 perfect 8
+sum(df.temp$Freq[df.temp$Var1>=8]) #19328 unique viruses with 8+ segments
+sum(df.temp$Freq[df.temp$Var1>8]) #637 viruses >8 segments (dup seqs to be removed)
+sum(df.temp$Freq[df.temp$Var1<8]) #5894 viruses with <8 segments...BYE! ## this is a change in v2
+
+ggplot(df.temp)+
+  geom_bar(aes(x=Var1,y=Freq),stat="identity", fill="cyan4")+
+  labs(x="# segments", y="# viral samples")+
+  ggtitle("N segments per sample pre-clean ")+
+  plot.theme
+ggsave(paste0(f.out.p,"ncbi.segment.persample.pre-clean.png"),height=4,width=4)
+```
+
+## Identify duplicate segments with same concatenated sample and samples with no HA
+```{r}
+#per-sample counts (for QC)
+samp<-meta%>%dplyr::group_by(sample)%>%count()
+samp$sample[samp$n>8]%>%head()
+
+#accessions for removal
+rem.dup.segment<-c()
+rem.incompleteseg<-c()
+type.temp<-c()
+
+# samples with no HA: remove all segments for those samples
+seg.by.sample<-meta%>%
+  dplyr::group_by(sample)%>%
+  dplyr::summarise(
+    n_seg=dplyr::n_distinct(segment[segment!=""]),
+    .groups="drop")
+
+incomplete.samples<-seg.by.sample$sample[seg.by.sample$n_seg<8]
+rem.incompleteseg<-meta$accession[which(meta$sample%in%incomplete.samples)]
+rem.incompleteseg<-unique(rem.incompleteseg)
+
+# duplicate segments within sample: pick best, drop others 
+meta$row_id<-seq_len(nrow(meta))
+
+#subset of rows that are duplicated within (sample,segment)
+dup_info<-meta%>%
+  dplyr::group_by(sample,segment)%>%
+  dplyr::filter(dplyr::n()>1)%>%
+  dplyr::ungroup()
+
+#split by sample+segment groups
+if(nrow(dup_info)>0){
+  dup_list<-split(dup_info,interaction(dup_info$sample,dup_info$segment,drop=TRUE))
+
+  rem_list<-lapply(dup_list,function(df){
+    #df has duplicated rows for one sample+segment
+    idx_all<-df$row_id
+    com<-df$nuc_completeness
+
+    #1) complete vs partial: if any "complete", drop all non-"complete"
+    if(any(com=="complete",na.rm=TRUE)){
+      keep_pool<-which(com=="complete")
+      rem_partial<-setdiff(seq_along(idx_all),keep_pool)
+      rem_rows<-idx_all[rem_partial]
+      reason<-rep("partial",length(rem_rows))
+    }else{
+      keep_pool<-seq_along(idx_all)
+      rem_rows<-integer(0)
+      reason<-character(0)
+    }
+
+    #rows still competing to keep
+    pool_idx<-idx_all[keep_pool]
+
+    #2) release date: keep newest, older→"older" (only if there is variation)
+    if(length(pool_idx)>1){
+      days<-df$release_date[keep_pool]
+      if(sum(!is.na(days))>1&&length(unique(days[!is.na(days)]))>1){
+        max_day<-max(days,na.rm=TRUE)
+        keep_day<-which(days==max_day)[1]
+        keep_row<-pool_idx[keep_day]
+        rem_older<-setdiff(pool_idx,keep_row)
+        rem_rows<-c(rem_rows,rem_older)
+        reason<-c(reason,rep("older",length(rem_older)))
+        pool_idx<-keep_row
+      }
+    }
+
+    #3) sequence length: keep longest, shorter→"shorter"
+    if(length(pool_idx)>1){
+      lens<-df$length[keep_pool][match(pool_idx,idx_all[keep_pool])]
+      if(length(unique(lens[!is.na(lens)]))>1){
+        max_len<-max(lens,na.rm=TRUE)
+        keep_len<-which(lens==max_len)[1]
+        keep_row<-pool_idx[keep_len]
+        rem_short<-setdiff(pool_idx,keep_row)
+        rem_rows<-c(rem_rows,rem_short)
+        reason<-c(reason,rep("shorter",length(rem_short)))
+        pool_idx<-keep_row
+      }
+    }
+
+    #4) if still >1 (identical), keep first row_id, others→"samesies"
+    if(length(pool_idx)>1){
+      keep_row<-pool_idx[1]
+      rem_same<-setdiff(pool_idx,keep_row)
+      rem_rows<-c(rem_rows,rem_same)
+      reason<-c(reason,rep("samesies",length(rem_same)))
+      pool_idx<-keep_row
+    }
+
+    if(length(rem_rows)==0)return(NULL)
+    data.frame(row_id=rem_rows,reason=reason,stringsAsFactors=FALSE)
+  })
+
+  rem_df<-do.call(rbind,rem_list[!sapply(rem_list,is.null)])
+
+  if(!is.null(rem_df)&&nrow(rem_df)>0){
+    rem.dup.segment<-unique(meta$accession[match(rem_df$row_id,meta$row_id)])
+    type.temp<-rem_df$reason[match(meta$accession[match(rem_df$row_id,meta$row_id)],rem.dup.segment)]
+  }
+}
+
+#QC: numbers and reasons
+rem.dup.segment<-unique(rem.dup.segment)
+length(rem.dup.segment) #5651
+
+if(length(type.temp)>0){
+  table(type.temp)/length(type.temp)*100%>%sort()
+}
+
+rem.incompleteseg<-unique(rem.incompleteseg)
+length(rem.incompleteseg) #12808
+length(unique(c(rem.incompleteseg,rem.dup.segment)))  #total removed for both reasons
+```
+
+## remove dup segments and samples with no HA segment from Meta
+```{r}
+#filtered meta.f henceforth
+meta.f<-meta %>% 
+  filter(!accession %in% rem.dup.segment) %>%
+  filter(!accession %in% rem.incompleteseg)
+nrow(meta.f) #154,496
+
+#Check for any remaining duplicates
+samp<-meta.f %>% dplyr::group_by(sample) %>% count()
+table(samp$n) #nice! all 19312 have 8 segments)
+# samp$sample[samp$n>8] %>% head
+
+#n HA should match n unique samples if no duplicate HA 
+length(which(meta.f$segment=="HA"))==length(unique(meta.f$sample))
+#yayy
+
+#text out
+cat(paste0("Excluded duplicates: ",length(rem.dup.segment)),
+    paste0("Excluded no HA: ",length(rem.incompleteseg)),
+    paste0("Excluded duplicates and no HA: ", length(unique(c(rem.incompleteseg,rem.dup.segment)))),
+    paste0("Final number meta/nuc sequences: ",nrow(meta.f)),
+    file=text.out,sep="\n",append = T)
+```
+
+# Filter excluded meta from sequences and split by segment
+## Read in the sequences and compare to meta
+```{r}
+#Read in the nucleotide sequence
+nuc<-readDNAStringSet(nuc.in)
+#names df to parse
+nuc.names<-data.frame(seq_name=names(nuc))
+
+## first parse concat acc/genbank title
+## HEADER=accession|Genbanktitle|isolate|biosample|sra_accession|assembly
+#caution, this could differ for future downloads
+nuc.names<-nuc.names %>%  
+  separate(seq_name, sep = "\\|", 
+           into=c("accession","genbank_title","isolate",
+                 "biosample","sra_accession","assembly"), remove = F)
+
+#clean up
+nuc.names$accession<-nuc.names$accession %>% trimws()
+nuc.names$genbank_title<-nuc.names$genbank_title%>% trimws()
+
+#remove special chars
+nuc.names$genbank_title<-str_replace_all(nuc.names$genbank_title, char_baddies,"")
+
+## do all sequences have meta in original dataset?
+all(nuc.names$accession %in% og.accession) #T==nicce
+length(unique(nuc.names$accession))==nrow(nuc.names) #accessions are unq
+```
+
+## remove seq where meta was excluded
+```{r}
+nuc.keep<-which(nuc.names$accession %in% meta.f$accession)
+nuc.keep.nm<-nuc.names$seq_name [nuc.keep] 
+length(nuc.keep)==nrow(meta.f) #T
+
+#keepers
+nuc.names<-nuc.names %>% 
+  dplyr::filter(seq_name %in% nuc.keep.nm)
+nuc<-nuc[nuc.keep] 
+
+#should be same
+length(nuc)==nrow(nuc.names) 
+nrow(meta.f)==nrow(nuc.names)
+
+#Rename seqname with accession_date_segment as seq_new (same as nucname.n in clean_gisaid)
+meta.f<-unite(data=meta.f, col="seq_new", accession, collection_date,segment, sep="|", remove = F)
+
+nuc.names <-nuc.names %>% 
+  left_join(meta.f[,c("seq_new","accession")],by="accession")
+
+#order should still be matching, but check
+all(names(nuc)==nuc.names$seq_name)
+
+#replace with new names
+names(nuc)<-nuc.names$seq_new #this is the equivalent of nucnames.n in the clean_gisaid (should unify naming)
+
+#ALSO add year to collectiondate (mix of yyyy yyyy-mm-dd yyyy-mm)
+meta.f$collection_year<-meta.f$collection_date
+for(i in 1:nrow(meta)){
+  spl<-str_split(meta.f$collection_year[i], "-") %>% unlist
+  if(length(spl)==1){next}
+  if(length(spl)>1){meta.f$collection_year[i]<-spl[1]}
+}
+# table(meta.f$collection_year)
+```
+
+# Summary plots of clean ncbi nucletodide sequence data
+## plot colors
+```{r}
+# segment colors
+segment.cols<-natparks.pals(name="Yellowstone", n=length(segments))
+segment.cols<-segment.cols[c(1,5,2,4,6,3,8,7)]
+names(segment.cols)<-segments
+
+# genotype colors
+geno.count<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(subtype) %>%
+  count() %>% as.data.frame() 
+subtype.ord<-geno.count$subtype[order(geno.count$n,decreasing = T)]
+
+subtype.cols<-natparks.pals(name="Olympic", n=length(unique(meta$subtype)))
+names(subtype.cols)<-subtype.ord
+```
+## Plot N nuc sequence by seg, over time
+```{r}
+#factors
+meta.f$segment<-factor(meta.f$segment, levels=segments)
+
+meta.count<-meta.f %>% dplyr::group_by(segment) %>% count()
+meta.count$segment<-factor(meta.count$segment, levels=segments)
+
+#Total seqs by segment
+ggplot(meta.f)+
+  geom_bar(aes(x=segment, fill=segment))+
+  geom_text(data=meta.count, aes(x=segment, label=paste0("n=",n), y=-4), vjust=1.3, size=2)+
+  labs(y="# ncbi nucleotide sequences")+
+  scale_fill_manual(values=segment.cols)+
+  plot.theme+
+  theme(legend.position = "none")
+ggsave(paste0(f.out.p,"n.ncbi.seq.byseg.png"),height=3,width=4)
+
+#release date over time
+ggplot(meta.f)+
+  geom_histogram(aes(x=release_date, fill=segment))+ 
+  # geom_text(data=meta.count, aes(x=segment, label=paste0("n=",n), y=-4), vjust=1.3, size=3)+
+  labs(y="# ncbi nucleotide sequences")+
+  scale_fill_manual(values=segment.cols)+
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y", 
+               # limits=as.Date(c("2004-01-01", "2025-02-01")), 
+               expand=c(0,0))+
+  plot.theme.date
+ggsave(paste0(f.out.p,"n.ncbi.seq.byseg.byreleasedate.png"),height=4,width=8)
+
+#POST 1996
+ggplot(meta.f)+
+  geom_histogram(aes(x=release_date, fill=segment))+ 
+  # geom_text(data=meta.count, aes(x=segment, label=paste0("n=",n), y=-4), vjust=1.3, size=3)+
+  labs(y="# ncbi nucleotide sequences")+
+  scale_fill_manual(values=segment.cols)+
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y", 
+               limits=as.Date(c("1996-01-01", "2025-02-01")),
+               expand=c(0,0))+
+  plot.theme.date
+ggsave(paste0(f.out.p,"n.ncbi.seq.byseg.byreleasedate.1996.png"),height=4,width=6)
+
+#collection date (year) over time
+ggplot(meta.f)+
+  geom_bar(aes(x=collection_year, fill=segment))+
+  # geom_text(data=meta.count, aes(x=segment, label=paste0("n=",n), y=-4), vjust=1.3, size=3)+
+  labs(y="# ncbi nucleotide sequences")+
+  scale_fill_manual(values=segment.cols)+
+  scale_x_discrete(expand=c(0,0))+
+  # scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
+  plot.theme.date
+ggsave(paste0(f.out.p,"n.ncbi.seq.byseg.bycolldate.png"),height=4,width=8)
+
+#collection year AFTER 1996
+meta.f %>% 
+  filter(as.numeric(collection_year)>=1996) %>% 
+  ggplot()+
+  geom_bar(aes(x=collection_year, fill=segment))+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi nucleotide sequences")+
+  scale_fill_manual(values=segment.cols)+
+  plot.theme.date
+ggsave(paste0(f.out.p,"n.ncbi.seq.byseg.bycolldate.1996.png"),height=4,width=6)
+
+## SAMPLES over time
+#collection year AFTER 1996
+meta.f %>% 
+  filter(segment=="HA") %>% #reps samples b/c all have one HA 
+  filter(as.numeric(collection_year)>=1996) %>% 
+  ggplot()+
+  geom_bar(aes(x=collection_year, fill=segment))+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples")+
+  scale_fill_manual(values=segment.cols)+
+  plot.theme.date+
+  theme(legend.position = "none")
+ggsave(paste0(f.out.p,"n.ncbi.seq.byseg.bycolldate.H5.1996.png"),height=4,width=6)
+```
+## Plot N nuc seqs by host
+```{r}
+# HOST (common name)
+host.count.yr<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(host, collection_year) %>%
+  count() %>% as.data.frame() 
+host.count<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(host) %>%
+  count() %>% as.data.frame() 
+host.ord<-host.count$host[order(host.count$n,decreasing = T)]
+host.count.yr$host<-factor(host.count.yr$host, levels=host.ord)
+host.count.yr$collection_year<-as.numeric(host.count.yr$collection_year)
+most<-host.count$host[which(host.count$n>=50)]
+less<-host.count$host[which(host.count$n>=10)]
+#less 
+host.count.yr %>% 
+  filter(host %in% less) %>%
+  ggplot()+
+  geom_bar(aes(x=host, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples,\nfor species with >=10 samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.host.year.10.png"),height=4,width=12)
+
+#hostest with the mostest
+host.count.yr %>% 
+  filter(host %in% most) %>%
+  ggplot()+
+  geom_bar(aes(x=host, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples,\nfor species with >=50 samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.host.year.50.png"),height=4,width=8)
+
+#most and only since 1996
+host.count.yr %>% 
+  filter(host %in% most) %>%
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=host, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples,\nfor species with >=50 samples")+
+  # scale_fill_manual(values=segment.cols)+
+  # scale_y_continuous(limits = c(100,3000))+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.host.year.50.1996.png"),height=4,width=8)
+```
+
+## Plot N nuc seq by country 
+```{r}
+#COUNTRY: sort by freq
+country.count.yr<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(country, collection_year) %>%
+  count() %>% as.data.frame() 
+country.count<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(country) %>%
+  count() %>% as.data.frame() 
+country.ord<-country.count$country[order(country.count$n,decreasing = T)]
+country.count.yr$country<-factor(country.count.yr$country, levels=country.ord)
+country.count.yr$collection_year<-as.numeric(country.count.yr$collection_year)
+most.c<-country.count$country[which(country.count$n>=50)]
+less.c<-country.count$country[which(country.count$n>=10)]
+
+#plotty
+country.count.yr %>% 
+  filter(country %in% less.c) %>%
+  ggplot()+
+  geom_bar(aes(x=country, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples,\nfor country with >=10 samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.country.year.10.png"),height=4,width=12)#plotty
+#MORE
+country.count.yr %>% 
+  filter(country %in% most.c) %>%
+  ggplot()+
+  geom_bar(aes(x=country, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples,\nfor country with >=50 samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.country.year.50.png"),height=4,width=8)
+#LESS and 1996+
+country.count.yr %>% 
+  filter(country %in% less.c) %>% #countryest with the mostest
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=country, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples,\nfor country with >=10 samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.country.year.10.1996.png"),height=5,width=12)
+```
+
+## Plot N Nuc seq by global continent
+```{r}
+#region: sort by freq
+region.count.yr<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(region, collection_year) %>%
+  count() %>% as.data.frame() 
+region.count<-meta.f %>% 
+  filter(segment=="HA") %>% 
+  dplyr::group_by(region) %>%
+  count() %>% as.data.frame() 
+region.ord<-region.count$region[order(region.count$n,decreasing = T)]
+region.count.yr$region<-factor(region.count.yr$region, levels=region.ord)
+region.count.yr$collection_year<-as.numeric(region.count.yr$collection_year)
+#plotty
+region.count.yr %>% 
+  ggplot()+
+  geom_bar(aes(x=region, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples", x="Global region")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.region.year.png"),height=4,width=12)#plotty
+
+#1996+
+region.count.yr %>% 
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=region, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx sample", x="Global region")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.region.year.1996.png"),height=5,width=12)
+```
+
+## Facet continent, bar host
+```{r}
+#continent: sort by freq
+host.continent.count.yr<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(host, continent, collection_year) %>%
+  count() %>% as.data.frame() 
+host.continent.count<-meta.f %>% 
+  filter(segment=="HA") %>% 
+  dplyr::group_by(host,continent) %>%
+  count() %>% as.data.frame() 
+host.continent.ord<-host.continent.count$host[order(host.continent.count$n,decreasing = T)]
+host.continent.count.yr$collection_year<-as.numeric(host.continent.count.yr$collection_year)
+host.continent.count.yr$continent<-factor(host.continent.count.yr$continent, levels=c("Americas","Asia","Europe","Africa","Oceania","Antarctica"))
+#host since 1996
+host.continent.count.yr %>% 
+  filter(host %in% less) %>%
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=host, y=log(n), fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="log # ncbi H5Nx samples,\nfor species with >=10 samples",x=NULL)+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position ="top",
+        legend.key.width=unit(2.5,"cm"),
+        axis.text.x=element_text(size=6))+
+  facet_grid(.~continent,scales="free_x",space="free")
+ggsave(paste0(f.out.p,"n.ncbi.samp.FACET-continent.host.year.50.1996.png"),height=4,width=16)
+```
+
+
+## N segments by sample post clean
+```{r}
+df.temp.f<-table(table(meta.f$sample)) %>% as.data.frame()
+df.temp.f$Var1<-as.numeric(df.temp.f$Var1)
+
+ggplot(df.temp.f)+
+  geom_bar(aes(x=Var1,y=Freq),stat="identity", fill="darkred")+
+  labs(x="# segments", y="# viral samples")+
+  ggtitle("N segments per sample post-clean ")+
+  plot.theme
+ggsave(paste0(f.out.p,"ncbi.segment.persample.post-clean.png"),height=4,width=4)
+
+#length distributions by segment
+meta.f %>%
+  ggplot()+
+  geom_point(aes(x=segment, y=length,color=segment),alpha=0.2, 
+             position = position_jitter(width = 0.4))+
+  scale_color_manual(values=segment.cols)+
+  guides(color=guide_legend(override.aes = list(alpha=1)))+
+  labs(y="Nucleotide sequence length")
+ggsave(paste0(f.out.p,"ncbi.nuclength.bysegment.png"),height=4,width=6)
+
+## closer look at differences in length rel to date
+meta.f$collection_year<-as.numeric(meta.f$collection_year)
+meta.f %>%
+  filter(meta.f$collection_year>=1996)%>%
+  # filter(segment=="HA") %>% 
+  ggplot()+
+  geom_point(aes(x=segment, y=length,color=collection_year),alpha=0.4, 
+             position = position_jitter(width = 0.4))+
+  scale_color_viridis_c(option = "inferno",direction = -1)+
+  guides(color=guide_colorbar(override.aes = list(alpha=1)))+
+  labs(y="Nucleotide sequence length")
+ggsave(paste0(f.out.p,"ncbi.nuclength.ColorbyDate.png"),height=4,width=7)
+```
+
+## N subtype by sample
+```{r}
+#subtype: sort by freq, and show top 50 most common
+subtype.count.yr<-meta.f %>% 
+  filter(segment=="HA") %>% #reps samples
+  dplyr::group_by(subtype, collection_year) %>%
+  count() %>% as.data.frame() 
+subtype.count.yr$subtype<-factor(subtype.count.yr$subtype, levels=subtype.ord)
+subtype.count.yr$collection_year<-as.numeric(subtype.count.yr$collection_year)
+#plotty
+subtype.count.yr %>% 
+  ggplot()+
+  geom_bar(aes(x=subtype, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.subtype.year.png"),height=4,width=8)
+#1996+
+subtype.count.yr %>% 
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=subtype, y=n, fill=collection_year),stat="identity")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# ncbi H5Nx samples")+
+  scale_fill_viridis_c(option = "inferno",direction = -1)+
+  plot.theme.date+
+  theme(legend.position =c(0.7,0.5))
+ggsave(paste0(f.out.p,"n.ncbi.samp.subtype.year.1996.png"),height=4,width=8)
+
+## subtype frequency over time
+subtype.count.yr %>% 
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=as.factor(collection_year), y=n, fill=subtype),stat="identity",position="stack")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="# samples by subtype per year", x="Collection year")+
+  scale_fill_manual(values=subtype.cols)+
+  plot.theme.date
+ggsave(paste0(f.out.p,"n.ncbi.samp.byGeno.year.1996.png"),height=4,width=8)
+
+## subtype frequency over time
+Count.yr.2<-subtype.count.yr %>% group_by(collection_year) %>% summarize(n_year=sum(n))
+subtype.count.yr.2<-left_join(subtype.count.yr, Count.yr.2, by="collection_year")
+subtype.count.yr.2<-subtype.count.yr.2 %>% mutate(prop= n/n_year)
+
+subtype.count.yr.2 %>%
+  filter(collection_year >=1996) %>%
+  ggplot()+
+  geom_bar(aes(x=as.factor(collection_year), y=prop, fill=subtype),stat="identity",position="stack")+
+  scale_x_discrete(expand=c(0,0))+
+  labs(y="Proportion samples by subtype per year", x="Collection year")+
+  scale_fill_manual(values=subtype.cols)+
+  plot.theme.date
+ggsave(paste0(f.out.p,"prop.ncbi.samp.byGeno.year.1996.png"),height=4,width=8)
+```
+
+# Output meta and sequences by segment
+## Separate into elements of lists 
+```{r}
+# nrow(meta.f)
+# length(nuc)
+#prime empty lists, each element will be a segments' meta/align
+meta.segs<-nuc.segs <- replicate(n=length(segments),vector())
+text.temp<-NA
+for(i in 1:length(segments)){
+  myseg<-segments[i]
+  mymet<-which(meta.f$segment==myseg) 
+  meta.segs[[i]]<-meta.f[mymet, ]
+  
+  #order of nuc elements matching mymeta accession
+  mynuc<-match(meta.f$accession[mymet], nuc.names$accession)
+  nuc.segs[[i]]<-nuc[mynuc]
+  
+  #text output of n seq by segment
+  text.temp<-paste0(text.temp, 
+                    "\nN sequences ", segments[i],": ", nrow(meta.segs[[i]])) 
+  }
+cat(text.temp, file=text.out,sep="\n",append = T)
+```
+
+## Export meta and nucleotide seqs by segment
+```{r}
+## Purrr exports
+purrr::walk2(meta.segs, meta.out, ~write.csv(.x,.y,row.names=FALSE))
+purrr::walk2(nuc.segs, nuc.out, ~writeXStringSet(.x,.y))
+```
+
+
+# Protein and coding region sequences
+## Read in protein sequences, coding regions
+```{r}
+#Read in proteins and coding regions
+prot<-readAAStringSet(prot.in)
+cds<-readDNAStringSet(cds.in)
+
+length(prot) #254694
+length(prot)==length(cds) #one to one by what variable? mix of assembly, biosample
+range(width(prot))
+range(width(cds))
+```
+## parse protein names
+```{r}
+#names df to parse
+prot.names<-data.frame(seq_name=names(prot))
+
+## first parse concat acc/genbank/isolate/biosample/sra/assembly
+prot.names<-prot.names %>%  separate(seq_name, sep = "\\|", 
+                                     into=c("prot_accession","genbank_title",
+                                            "isolate","biosample",
+                                            "sra_accession","assembly"), 
+                                     remove = F)
+prot.names$prot_accession<-trimws(prot.names$prot_accession)
+
+prot.names<-prot.names %>%  
+  separate(genbank_title, sep = " \\[|\\]", 
+           into=c("protein","strain","xxx"), remove = F)
+length(unique(prot.names$protein)) #130 unq proteins...
+```
+
+## parse coding region names 
+```{r}
+cds.names<-data.frame(seq_name=names(cds))
+
+#these are named differently, and I think can be used to join the nucleotide and protein accessions...
+cds.names<-cds.names %>%  separate(seq_name, sep = "\\|", 
+                                     into=c("accession", #nuc accession + pos
+                                            "genbank_title",
+                                            "prot_accession",
+                                         "biosample","sra_accession",
+                                         "assembly", "isolate"), #isolate??
+                                     remove = F)
+cds.names$accession<-trimws(cds.names$accession)
+
+cds.names<-cds.names %>%  
+  separate(genbank_title, sep = " \\[|\\]", 
+           into=c("codingregion","strain","xxx"), remove = F)
+length(unique(cds.names$codingregion)) #130 unq codingregions...
+
+## CDS nuc_accessions extraction
+#remove join text and start new clean column
+cds.names$accession_clean<-cds.names$accession %>%
+  str_replace_all("join\\(","")%>%
+  str_replace_all("\\)","")%>%
+  trimws()
+
+#nuc accession extract
+cds.names$nuc_accession<-str_extract(cds.names$accession_clean,"^[^:]+")  
+
+#coords: drop all ACC: prefixes, keep ranges (including < and >)
+cds.names$nuc_coords<-cds.names$accession_clean%>%
+  str_replace_all("[A-Za-z0-9_.]+:","")%>%
+  trimws()
+
+acc_multi<-str_extract_all(cds.names$accession_clean,"[A-Za-z0-9_.]+(?=:)")
+
+bad_multi<-which(sapply(acc_multi,function(x)length(unique(x))>1))
+length(bad_multi)  #should be 0 ideally
+
+cds.names$nuc_coords<-str_replace_all(cds.names$nuc_coords,c("\\.\\."="-",
+                                                             "\\<"="",
+                                                             "\\>"=""))
+```
+
+## Join cds to prot
+```{r}
+all(cds.names$genbank_title %in% prot.names$genbank_title) #wow, that's nice
+all(cds.names$prot_accession %in% prot.names$prot_accession) #nice! 
+length(unique(prot.names$prot_accession))==nrow(prot.names) #and they're unique
+
+#Prep data to join prot.names and cds.names
+colnames(cds.names)<-colnames(cds.names) %>%
+  str_replace_all(c("^accession$"="cds_accession",
+                    "^seq_name$"="cds_seq_name"))
+#JOIN
+prot.cds.names<-left_join(prot.names,
+                          cds.names[,c("prot_accession","cds_seq_name",
+                                       "nuc_accession","nuc_coords")],
+                          by="prot_accession")
+
+#how matchy to nuc.names
+length(which(nuc.names$accession %in% prot.cds.names$nuc_accession))
+nrow(nuc.names) #nearly all have match
+# nuc.names[which(!nuc.names$accession %in% cds.names$nuc_accession),]
+```
+
+## harmonize protein naming
+```{r}
+#lowercase protein names
+prot.cds.names$protein[is.na(prot.cds.names$protein)]<-""
+prot.cds.names$protein<-str_to_lower(prot.cds.names$protein)
+length(unique(prot.cds.names$protein))
+
+#remove generic words and junk
+prot.cds.names$protein<-str_replace_all(prot.cds.names$protein,
+  ",| protein|protein|protien| partial|partial|putative |subunit |subunit| subtype| ion channel|rna | virus|virus|truncated | chain|subtype h5| h5| esterase| proptein|\\(|\\)|endogenous |mag\\: ",    "")
+prot.cds.names$protein<-trimws(prot.cds.names$protein)
+
+#spell/normalize to canonical segment/protein labels
+prot_map<-c(
+  "non-structural|non-structrual|non structural"="nonstructural",
+  "baseic"="basic",
+  "nucelar"="nuclear",
+  "acid$"="acidic",
+  "matix"="matrix",
+  " 1"="1",
+  " 2"="2",
+  "prepropeptide"="precursor",
+  "hemagglutinin|haemmagglutinin|haemagglutinin|hemaggluinin|hemaglutinin|hemmaglutinin|^ha"="HA",
+  "neuraminidase|nueraminidase|neuramindase|neuraminadase|^na"="NA",
+  "polymerase |polymerase| polymerase|plymerase"="P",
+  "acidic|pa|^pa$"="A",
+  "basic |basic|pb|b$"="B",
+  "pb1 f1"="PB1-F1",
+  " F|-f"="-F",
+  "membrane m|membrane; |membrane|matrix m|matrix|m$|mp|^m"="M",
+  "nucleoprotein|nucleocapsid|nucelocpasid|nucelocapsid|nucleo|np"="NP",
+  "nuclear export|nuclear|nep"="NEP",
+  "nonstructural ns|nonstructural|nonstructual|nonstractual|ns"="NS",
+  "nsns"="NS",
+  "Mm|M m|Matrix m"="M",
+  "NA na"="NA",
+  "HA ha"="HA",
+  "AP|Pa|^A$|P A|^P$"="PA",
+  "BP2|B2P|Pb2|B2$|^P2"="PB2",
+  "BP1|B1P|Pb1|^B1|^P1"="PB1",
+  "A-x"="PA-X",
+  "NS1 NS"="NS1",
+  "NP NP"="NP",
+  "F2P|f2"="F2",
+  " F2"="-F2",
+  "^B2$"="PB2",
+  "PPB2"="PB2",
+  "nep\\/ns2|NS2\\/NEP|NEP\\/NS2|NS2|ns2|NEP1|NEP2"="NEP")
+
+prot.cds.names$protein<-str_replace_all(prot.cds.names$protein,prot_map)%>%trimws()
+length(unique(prot.cds.names$protein))
+table(prot.cds.names$protein)%>%sort()
+
+#manual fixes
+# NS → NS1 (based on manual checks), should add something here
+prot.cds.names$protein[prot.cds.names$protein=="NS"]<-"NS1"
+
+# PB that are actually PA or PB1 (accession-specific)
+prot.cds.names$protein[prot.cds.names$protein=="PB" &
+                     prot.cds.names$prot_accession=="BAN28803.1"]<-"PA"
+prot.cds.names$protein[prot.cds.names$protein=="PB" & 
+                     str_detect(prot.cds.names$prot_accession,"ABI33")]<-"PB1"
+# 
+# # P3 → PA (based on BLAST)
+# prot.cds.names$protein<-str_replace_all(prot.cds.names$protein,"^P3$","PA")
+
+#remove special chars in strain
+prot.cds.names$strain<-str_replace_all(prot.cds.names$strain,char_baddies,"")
+
+#segment lookup table
+protnm.seg<-read.csv(prot.segment.look,stringsAsFactors=FALSE)
+protnm.seg<-protnm.seg[,-1]
+
+colnames(protnm.seg)[1]<-"protein"
+protnm.seg$protein[is.na(protnm.seg$protein)]<-"NA"
+protnm.seg$segment[is.na(protnm.seg$segment)]<-"NA"
+
+#join protein→segment and set factor levels
+prot.cds.names<-dplyr::left_join(prot.cds.names,protnm.seg,by="protein")
+prot.cds.names$segment<-factor(prot.cds.names$segment,levels=segments)
+
+# Filter out M?
+```
+
+## match to nucleotide samples by nuc accesssion
+```{r}
+#for coding region, we have nuc_accession (almost all)
+#else assembly/sra/isolate to try to match proteins and connect via the sample (connects segment sequence nuc_accessions)
+
+#make NA instead of "". note to self to remove capitalization inconsist
+for(col in c("nuc_accession","biosample","prot_accession",
+             "assembly","isolate","sra_accession","strain")){
+  prot.cds.names[[col]][prot.cds.names[[col]]==""]<-NA
+}
+
+## do all sequences have meta (nuc) in original dataset? (diagnostics)
+length(which(prot.cds.names$nuc_accession %in% meta.f$accession)) #228696
+nrow(meta.f) #154496
+m<-which(meta.f$accession %in% prot.cds.names$nuc_accession ) 
+l.m<-length(m); l.m #154437
+nrow(meta.f) - l.m #59 nucname sequences without a cds match
+#wow, almost all nucs have at least one coding region match (multiples for M1,M2...)
+
+#match iteratively to proteins through assembly 2, else assembly, else biosample.
+match.acc<-which(!is.na(prot.cds.names$nuc_accession) &
+                   prot.cds.names$nuc_accession%in%meta.f$accession)
+match.ass<-which(!is.na(prot.cds.names$assembly) &
+                   prot.cds.names$assembly%in%meta.f$assembly)
+match.bio<-which(!is.na(prot.cds.names$biosample) &
+                   prot.cds.names$biosample%in%meta.f$biosample)
+length(match.acc) # 228696
+length(match.ass) #215152
+length(match.bio) #73996
+
+#assign protein and coding sequences (df) a 'sample' from meta.f using priority:
+# 1) nuc_accession, 2) assembly, 3) biosample, 4) strain_parse, 5) isolate (changed v2)
+prot.cds.names$sample<-NA_character_
+prot.cds.names$matched<-NA_character_
+
+#1. nuc_accession (just accession in nuc_names)
+acc.map<-meta.f%>%
+  dplyr::filter(!is.na(accession))%>%
+  dplyr::select(accession,sample)%>%
+  dplyr::distinct()
+
+idx.acc<-match(prot.cds.names$nuc_accession, acc.map$accession)
+hit.acc<-which(!is.na(idx.acc) & is.na(prot.cds.names$sample))
+if(length(hit.acc)>0){
+  prot.cds.names$sample[hit.acc]<-acc.map$sample[idx.acc[hit.acc]]
+  prot.cds.names$matched[hit.acc]<-"nuc_accession"}
+
+#2. assembly
+ass.map<-meta.f%>%
+  dplyr::filter(!is.na(assembly))%>%
+  dplyr::select(assembly,sample)%>%
+  dplyr::distinct()
+
+idx.ass<-match(prot.cds.names$assembly,ass.map$assembly)
+hit.ass<-which(!is.na(idx.ass) & is.na(prot.cds.names$sample))
+if(length(hit.ass)>0){
+  prot.cds.names$sample[hit.ass]<-ass.map$sample[idx.ass[hit.ass]]
+  prot.cds.names$matched[hit.ass]<-"assembly"}
+
+#3. biosample
+bio.map<-meta.f%>%
+  dplyr::filter(!is.na(biosample))%>%
+  dplyr::select(biosample,sample)%>%
+  dplyr::distinct()
+
+idx.bio<-match(prot.cds.names$biosample,bio.map$biosample)
+hit.bio<-which(!is.na(idx.bio) & is.na(prot.cds.names$sample))
+if(length(hit.bio)>0){
+  prot.cds.names$sample[hit.bio]<-bio.map$sample[idx.bio[hit.bio]]
+  prot.cds.names$matched[hit.bio]<-"biosample"}
+
+#4. Strain (using strain_parse in meta.f)
+str.map<-meta.f%>%
+  dplyr::filter(!is.na(strain_parse))%>%
+  dplyr::select(strain_parse,sample)%>%
+  dplyr::distinct()
+
+idx.str<-match(prot.cds.names$strain,str.map$strain_parse)
+hit.str<-which(!is.na(idx.str) & is.na(prot.cds.names$sample))
+if(length(hit.str)>0){
+  prot.cds.names$sample[hit.str]<-str.map$sample[idx.str[hit.str]]
+  prot.cds.names$matched[hit.str]<-"strain"}
+
+#5. isolate
+iso.map<-meta.f%>%
+  dplyr::filter(!is.na(isolate))%>%
+  dplyr::select(isolate,sample)%>%
+  dplyr::distinct()
+
+idx.iso<-match(prot.cds.names$isolate, iso.map$isolate)
+hit.iso<-which(!is.na(idx.iso) & is.na(prot.cds.names$sample))
+if(length(hit.iso)>0){
+  prot.cds.names$sample[hit.iso]<-iso.map$sample[idx.iso[hit.iso]]
+  prot.cds.names$matched[hit.iso]<-"isolate"}
+
+#how many still NA (how many filled in)?
+nocdssamp<-which(is.na(prot.cds.names$sample))
+nocdssamp<-unique(nocdssamp)
+length(nocdssamp) # 18 828 #many/most of these may be connected to nuc samples that were filtered (passaged, vaccine, clone, incomplete, .. )
+# prot.cds.names[nocdssamp, ]
+
+#REMOVE protein/coding with no matching assembly, prot_accession, biosample, or strain
+prot.cds.names<-prot.cds.names%>%dplyr::filter(!is.na(sample))
+nrow(prot.cds.names) # 235866
+
+#text out
+cat(paste0("Protein and coding sequences rem due to no matching accession, assembly, biosample in cleaned nuc meta: ", length(nocdssamp)),
+    file=text.out,sep="\n",append=TRUE)
+```
+
+## Plot N proteins/coding regions per segment
+```{r}
+#order by most to least common
+prot.count<-prot.cds.names %>% group_by(segment, protein) %>% count()
+prot.ord<-prot.count$protein[order(prot.count$segment, prot.count$n)]
+# prot.ord
+prot.cds.names$protein<-factor(prot.cds.names$protein, levels=prot.ord)
+#Plot it out
+prot.cds.names %>%
+  ggplot()+
+  geom_bar(aes(x=protein, fill=segment), )+
+  scale_fill_manual(values=segment.cols)+
+  plot.theme.date
+ggsave(paste0(f.out.p,"protein.bysegments.pre-filter.png"),width=8,height=4)
+```
+
+## Identify duplicate proteins/coding with same sample
+```{r}
+samp.pr<-prot.cds.names%>%
+  dplyr::group_by(sample)%>%
+  count()
+
+#find duplicated sample+protein combos
+dup_prot<-prot.cds.names%>%
+  dplyr::group_by(sample,protein)%>%
+  dplyr::filter(dplyr::n()>1)%>%
+  dplyr::ungroup()
+
+rem.dup.protein<-c()
+type.temp<-c()
+
+if(nrow(dup_prot)>0){
+  #for each sample+protein, keep first, remove the rest
+  dup_drop<-dup_prot%>%
+    dplyr::group_by(sample,protein)%>%
+    dplyr::slice(-1)%>%           #drop all but first
+    dplyr::ungroup()
+
+  rem.dup.protein<-unique(dup_drop$prot_accession)
+  type.temp<-rep("samesies",length(rem.dup.protein))
+}
+
+length(rem.dup.protein)  #number of duplicate protein records to remove 7160
+
+if(length(type.temp)>0){
+  table(type.temp)/length(type.temp)*100%>%sort()}
+
+#remove the duplicates to filtered df
+prot.cds.names.f<-prot.cds.names%>%
+  dplyr::filter(!prot_accession%in%rem.dup.protein)
+
+nrow(prot.cds.names.f) #228706
+length(unique(prot.cds.names.f$sample)) #19312
+```
+
+## Protein sequence plots
+```{r}
+## N seq by protein, segment
+prot.cds.names.f$protein<-factor(prot.cds.names.f$protein, levels=prot.ord)
+
+#Plot it out
+prot.cds.names.f %>%
+  ggplot()+
+  geom_bar(aes(x=protein, fill=segment), )+
+  scale_fill_manual(values=segment.cols)+
+  plot.theme.date
+ggsave(paste0(f.out.p,"protein.bysegments.post-filter.png"),width=8,height=4)
+
+#Only with >= 10 seqs
+prot.cds.names.f %>%
+  filter(protein %in% prot.count$protein[prot.count$n>=100]) %>%
+  ggplot()+
+  geom_bar(aes(x=protein, fill=segment), )+
+  scale_fill_manual(values=segment.cols)+
+  plot.theme.date
+ggsave(paste0(f.out.p,"protein.bysegments.post-filter.100.png"),width=8,height=4)
+```
+
+## Separate protein sequences and their meta in list
+```{r}
+#add column for new name prot_accession|nuc_accession|protein, 
+prot.cds.names.f<- prot.cds.names.f %>% 
+  unite(col = newname, #should call this protname in the future, and cdsname also
+        prot_accession, nuc_accession, protein, sep = "|",remove = F)
+head(prot.cds.names.f$newname)
+
+prot.meta<-prot.segs<-replicate(n=length(prot.ord),vector())
+text.temp<-NA
+for(i in 1:length(prot.ord)){
+  myprot<-prot.ord[i] # for each protein
+  #what protein data matches this prot
+  matchprot<-which(prot.cds.names.f$protein==myprot)
+  #original seq_name is specific to protein seq
+  matchprotacc<-match(prot.cds.names.f$seq_name[matchprot],names(prot))
+  #subset the protein amino acid sequence set
+  prot.segs[[i]]<-prot[matchprotacc] 
+  prot.meta[[i]]<-prot.cds.names.f[matchprot,]
+  #Rename protein sequences with accession_strain_protein
+  names(prot.segs[[i]])<-prot.meta[[i]]$newname
+  # all(names(prot.segs[[i]]) %in%   prot.meta[[i]]$seq_name)
+  text.temp<-paste0(text.temp, 
+                    "\nN sequences ", prot.ord[i],": ", length(prot.segs[[i]]))}
+
+cat(text.temp, file=text.out,sep="\n",append = T)
+```
+
+## Repeat for coding region sequences
+```{r}
+cds.meta<-cds.segs<-replicate(n=length(prot.ord),vector())
+cds.text.temp<-NA
+for(i in 1:length(prot.ord)){
+  myprot<-prot.ord[i] # for each cds
+  #what cds data matches this cds
+  matchprot<-which(prot.cds.names.f$protein==myprot)
+  matchprotacc<-match(prot.cds.names.f$cds_seq_name[matchprot],names(cds))
+  #subset the cds amino acid sequence set
+  cds.segs[[i]]<-cds[matchprotacc]
+  cds.meta[[i]]<-prot.cds.names.f[matchprot,]
+  #Rename cds sequences with protaccession_nucaccession_protein
+  names(cds.segs[[i]])<-cds.meta[[i]]$newname
+  text.temp<-paste0(text.temp,
+                    "\nN coding sequences ", prot.ord[i],": ", length(cds.segs[[i]]))}
+
+cat(text.temp, file=text.out,sep="\n",append = T)
+```
+
+## Export unaligned proteins/coding regions and corresponding meta
+```{r}
+prot.ord2<-str_replace_all(prot.ord, " |\\/","")
+prot.meta.out<-paste0(f.out,"ncbi_protein_meta_",prot.ord2,".csv")
+prot.out<-paste0(f.out,"ncbi_protein_",prot.ord2,".fasta")
+
+## Export data in list, purr version
+purrr::walk2(prot.meta, prot.meta.out, ~write.csv(.x,.y,row.names=FALSE))
+purrr::walk2(prot.segs, prot.out, ~writeXStringSet(.x,.y))
+
+## Export unaligned codingregions and corresponding meta
+prot.ord2<-str_replace_all(prot.ord, " |\\/","")
+# cds.meta.out<-paste0(f.out,"ncbi_codingregion_meta_",prot.ord2,".csv") #same as prot.meta
+cds.out<-paste0(f.out,"ncbi_codingregion_",prot.ord2,".fasta")
+
+## Export data in list, purr version
+# purrr::walk2(cds.meta, cds.meta.out, ~write.csv(.x,.y,row.names=FALSE))
+purrr::walk2(cds.segs, cds.out, ~writeXStringSet(.x,.y))
+```
+
+## summary table output
+```{r}
+tab.temp<-prot.cds.names.f %>% group_by(protein, segment) %>% count()
+write.csv(tab.temp, paste0(f.out.p, "protein_count.csv"))
+
+tab.temp.nuc<-meta.f %>% 
+  group_by(segment) %>% count()
+write.csv(tab.temp.nuc, paste0(f.out.p, "nuc_count.csv"))
+```
+
