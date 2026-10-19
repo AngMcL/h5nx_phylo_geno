@@ -1,0 +1,67 @@
+Script ncbi_clean.Rmd run date: 2025-12-12
+Meta nrows initial: 174051
+Excluded, vaccines: 29
+Excluded, cultured: 4
+Excluded, mutants: 0
+Excluded, clones: 1173
+Meta nrow after excl vaccines, cultured, clones, mutants: 172845
+Excluded, no date: 0
+Excluded, no host: 135
+Excluded, no location: 0
+Excluded, no date/host/location: 135
+N Wrong segment: 3
+Excluded duplicates: 5651
+Excluded no HA: 12808
+Excluded duplicates and no HA: 18214
+Final number meta/nuc sequences: 154496
+NA
+N sequences PB2: 19312
+N sequences PB1: 19312
+N sequences PA: 19312
+N sequences HA: 19312
+N sequences NP: 19312
+N sequences NA: 19312
+N sequences M: 19312
+N sequences NS: 19312
+Protein and coding sequences rem due to no matching accession, assembly, biosample in cleaned nuc meta: 18828
+NA
+N sequences PB2: 19292
+N sequences PB1-F2: 18384
+N sequences PB1: 19287
+N sequences PA-X: 17545
+N sequences PA: 19302
+N sequences HA: 19302
+N sequences NP: 19309
+N sequences NA: 19304
+N sequences M: 155
+N sequences M2: 19072
+N sequences M1: 19159
+N sequences NEP: 19286
+N sequences NS1: 19309
+NA
+N sequences PB2: 19292
+N sequences PB1-F2: 18384
+N sequences PB1: 19287
+N sequences PA-X: 17545
+N sequences PA: 19302
+N sequences HA: 19302
+N sequences NP: 19309
+N sequences NA: 19304
+N sequences M: 155
+N sequences M2: 19072
+N sequences M1: 19159
+N sequences NEP: 19286
+N sequences NS1: 19309
+N coding sequences PB2: 19292
+N coding sequences PB1-F2: 18384
+N coding sequences PB1: 19287
+N coding sequences PA-X: 17545
+N coding sequences PA: 19302
+N coding sequences HA: 19302
+N coding sequences NP: 19309
+N coding sequences NA: 19304
+N coding sequences M: 155
+N coding sequences M2: 19072
+N coding sequences M1: 19159
+N coding sequences NEP: 19286
+N coding sequences NS1: 19309
