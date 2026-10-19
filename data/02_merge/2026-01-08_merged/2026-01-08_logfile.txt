@@ -1,0 +1,23 @@
+Run date: 2026-01-08
+NA
+ N sequences HA: 61491
+ N sequences M: 61491
+ N sequences NA: 61491
+ N sequences NP: 61491
+ N sequences NS: 61491
+ N sequences PA: 61491
+ N sequences PB1: 61491
+ N sequences PB2: 61491
+NA
+ N merged a.a. sequences HA: 61351
+ N merged a.a. sequences M1: 61028
+ N merged a.a. sequences M2: 60706
+ N merged a.a. sequences NA: 61357
+ N merged a.a. sequences NEP: 61166
+ N merged a.a. sequences NP: 61388
+ N merged a.a. sequences NS1: 61206
+ N merged a.a. sequences PA: 51475
+ N merged a.a. sequences PA-X: 61295
+ N merged a.a. sequences PB1: 58294
+ N merged a.a. sequences PB1-F2: 60979
+ N merged a.a. sequences PB2: 61268

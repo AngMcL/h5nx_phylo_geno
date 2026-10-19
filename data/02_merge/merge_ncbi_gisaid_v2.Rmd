@@ -1,0 +1,217 @@
+---
+title: "merge ncbi and gisaid"
+output: github_document
+date: "2025-03-08"
+---
+
+# objectives
+* read in clean ncbi and gisaid
+* Compare and print lengths in each
+* Harmonize column names in meta
+* Merge together for each segment
+* Any obvious identical?
+* Export merged data
+
+## change log 
+### 2025-04-02
+* fixed issue with isolate_name not carrying forward (to match on sample)
+
+### 2025-03-27
+* fixed issues with file naming for proteins
+* need to re-run prot alignments, but nucleotide fine
+* updated some file naming, folder strctr
+
+# Setup
+## libs
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r libs, message=FALSE}
+library(tidyverse)
+library(Biostrings)
+library(gtools)
+```
+
+## Ins and Outs
+```{r}
+#ncbi, most recent clean_out
+ncbi.f<-"../01a_ncbi/clean_ncbi/ncbi_out_2025-12-12/"
+gis.f<-"../01b_gisaid/clean_gisaid/gisaid_out_2026-01-08/"
+
+#within them
+ncbi.meta.in<-list.files(ncbi.f,pattern = "ncbi_meta*",full.names = T) %>% mixedsort()
+ncbi.nuc.in<-list.files(ncbi.f,pattern = "ncbi_nuc*",full.names = T)  %>% mixedsort()
+#multimatch
+ncbi.prot.in0<-list.files(ncbi.f,pattern = "ncbi_protein*",full.names = T)  %>% mixedsort()
+ncbi.prot.in<-str_subset(ncbi.prot.in0, "meta", negate = T) %>% mixedsort()
+ncbi.prot.meta.in<-str_subset(ncbi.prot.in0, "meta") %>% mixedsort()
+
+#gisaid
+gis.meta.in<-list.files(gis.f,pattern = "gisaid_meta*",full.names = T) %>% mixedsort()
+gis.nuc.in<-list.files(gis.f,pattern = "gisaid_nuc*",full.names = T)  %>% mixedsort()
+#multimatch
+gis.prot.in0<-list.files(gis.f,pattern = "gisaid_protein*",full.names = T)  %>% mixedsort()
+gis.prot.in<-str_subset(gis.prot.in0, "meta", negate = T) %>% mixedsort()
+gis.prot.meta.in<-str_subset(gis.prot.in0, "meta") %>% mixedsort()
+
+#outputs
+today<-Sys.Date()
+f.out<-paste0(today, "_merged/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+f.out.meta<-paste0(f.out, "merged_meta/")
+if(!dir.exists(f.out.meta)){dir.create(f.out.meta)}
+f.out.fasta<-paste0(f.out, "merged_fasta/")
+if(!dir.exists(f.out.fasta)){dir.create(f.out.fasta)}
+
+#output for each segment (alphabetical)
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS") %>% mixedsort()
+prot.ord<-c("PB2","PB1","PB1-F2","PA-X","PA","HA",
+            "NP","NA", "M1","M2", "NEP","NS1") %>% mixedsort()
+
+nuc.meta.out<-str_replace_all(gis.meta.in, gis.f, f.out.meta) %>% 
+  str_replace_all("gisaid","merged")
+
+nuc.out<-str_replace_all(gis.nuc.in, gis.f, f.out.fasta) %>% 
+  str_replace_all("gisaid","merged")
+
+prot.meta.out<-str_replace_all(gis.prot.meta.in, gis.f, f.out.meta) %>% 
+  str_replace_all("gisaid","merged")
+
+prot.out<-str_replace_all(gis.prot.in, gis.f, f.out.fasta) %>% 
+  str_replace_all("gisaid","merged")
+
+#Write a log text file
+text.out<-paste0(f.out,today,"_logfile.txt")
+cat(paste0("Run date: ",today),file=text.out,sep="\n",append = F)
+```
+
+## read in clean ncbi and gisaid meta, nuc, protein
+```{r}
+#set up empty lists for nuc and meta to read an element for each segment
+l.seg<-length(segments)
+
+message("Reading nucleotide data")
+ncbi.meta<-purrr::map(ncbi.meta.in,read.csv)
+ncbi.nuc<-purrr::map(ncbi.nuc.in,Biostrings::readDNAStringSet)
+gis.meta<-purrr::map(gis.meta.in,read.csv)
+gis.nuc<-purrr::map(gis.nuc.in,Biostrings::readDNAStringSet)
+
+#Separately iterate over prot (diff length)
+l.prot<-length(prot.ord)
+
+message("Reading protein data")
+ncbi.prot<-purrr::map(ncbi.prot.in,Biostrings::readAAStringSet)
+ncbi.prot.meta<-purrr::map(ncbi.prot.meta.in,read.csv)
+gis.prot<-purrr::map(gis.prot.in,Biostrings::readAAStringSet)
+gis.prot.meta<-purrr::map(gis.prot.meta.in,read.csv)
+
+#check
+names(ncbi.nuc[[1]]) %>% head
+# ncbi.prot[[1]] %>% head
+# length(ncbi.prot[[1]])
+# names(ncbi.prot[[1]])[1:5]
+```
+
+## Harmonize column names in meta
+```{r}
+i=1
+# head(ncbi.meta[[i]])
+# head(gis.meta[[i]])
+for(i in 1:l.seg){
+  #change meta colnames to lowercase
+  colnames(ncbi.meta[[i]])<-tolower(colnames(ncbi.meta[[i]]))
+  colnames(gis.meta[[i]])<-tolower(colnames(gis.meta[[i]]))
+}
+
+#Main columns to carry forward
+#explore which cols don't have match in other dataset: pick as needed
+ncbi.nomatch.col<-which(!colnames(ncbi.meta[[i]]) %in% colnames(gis.meta[[i]]))
+colnames(ncbi.meta[[i]])[ncbi.nomatch.col]
+gis.nomatch.col<-which(!colnames(gis.meta[[i]]) %in% colnames(ncbi.meta[[i]]))
+colnames(gis.meta[[i]])[gis.nomatch.col]
+
+#change to common set of colnames
+for(i in 1:l.seg){
+  #these are common to the sample and can be used to lookup sample 
+  gis.meta[[i]]$sample<-gis.meta[[i]]$isolate_id
+  
+  colnames(ncbi.meta[[i]])<-str_replace_all(colnames(ncbi.meta[[i]]),
+    c("geo_location"="location",
+      "geo_location_sml"="city"))
+  ncbi.meta[[i]]$date_parse<-as.character(ncbi.meta[[i]]$date_parse)
+}
+
+main.cols<-colnames(ncbi.meta[[i]])[which(colnames(ncbi.meta[[i]]) %in% colnames(gis.meta[[i]]))]
+main.cols
+
+#also want to carry forward select additional (that will only be complete for either)
+# which(main.col2 %in% colnames(gis.meta[[i]]))
+gis.cols<-unique(c(main.cols, c( "genotype", "lineage", "clade", "state",
+                                 "isolate_id","isolate_name","segment_id") ))
+
+ncbi.cols<-unique(c(main.cols, c( "genbank_title","accession") ))
+
+#Check each meta matches its nuc names
+all(ncbi.meta[[i]]$seq_new%in% names(ncbi.nuc[[i]]))
+all(gis.meta[[i]]$seq_new%in% names(gis.nuc[[i]]))
+```
+
+## Merge zem
+```{r}
+#for each segment, 
+merged.nuc<-merged.meta<-replicate(n=l.seg, vector())
+#bind_rows for meta and nucleotide sequences
+text.temp<-NA
+for(i in 1:l.seg){
+  myseg<-segments[i]
+  merged.meta[[i]]<-bind_rows(ncbi.meta[[i]][,ncbi.cols], gis.meta[[i]][,gis.cols])
+  merged.nuc[[i]]<-c(ncbi.nuc[[i]], gis.nuc[[i]])   
+
+  #text output of n seq by segment
+  text.temp<-paste0(text.temp, 
+                    "\n N sequences ", segments[i],": ", nrow(merged.meta[[i]])) 
+}
+cat(text.temp, file=text.out,sep="\n",append = T)
+```
+
+## Repeat for proteins
+```{r}
+merged.prot.meta<-merged.prot<-replicate(n=l.prot, vector()) 
+
+#bind_rows for meta (common columns only)
+#c() for fasta
+text.temp<-NA
+for(i in 1:l.prot){
+  myprot<-prot.ord[i]
+  merged.prot[[i]]<-c(ncbi.prot[[i]], gis.prot[[i]])
+  
+  #use gisaid isolate_id as the sample identifier
+  gis.prot.meta[[i]]$sample<-gis.prot.meta[[i]]$isolate_id
+  
+  #remove unnec col
+  ncbi.prot.meta[[i]]<-ncbi.prot.meta[[i]][,-which(colnames(ncbi.prot.meta[[i]]) %in% c("C"))]
+  merged.prot.meta[[i]]<-bind_rows(ncbi.prot.meta[[i]], gis.prot.meta[[i]])
+  
+  #text output of n seq by segment
+  text.temp<-paste0(text.temp, 
+                    "\n N merged a.a. sequences ", prot.ord[i],": ", nrow(merged.prot.meta[[i]])) 
+}
+
+cat(text.temp, file=text.out,sep="\n",append = T)
+```
+
+## Export merged data
+```{r}
+purrr::iwalk(seq_len(l.seg),function(i,.){
+  write.csv(merged.meta[[i]],nuc.meta.out[i])
+  Biostrings::writeXStringSet(merged.nuc[[i]],nuc.out[i])
+})
+
+purrr::iwalk(seq_len(l.prot),function(i,.){
+  write.csv(merged.prot.meta[[i]],prot.meta.out[i])
+  Biostrings::writeXStringSet(merged.prot[[i]],prot.out[i])
+})
+```
+
