@@ -1,0 +1,37 @@
+,protein.name,segment
+1,PA-X,PA
+2,HA1,HA
+3,HA2,HA
+4,PB1-F2,PB1
+5,PA,PA
+6,HA,HA
+7,M2,M
+8,M1,M
+9,NS2,NS
+10,NS1,NS
+12,PB1,PB1
+13,NP,NP
+14,NA,NA
+15,NEP,NS
+16,M,M
+17,NS,NS
+18,Mag: NA,NA
+19,Mag: HA,HA
+20,NEP2,NS
+21,NEP1,NS
+22,PB2,PB2
+23,NS2/NEP,NS
+24,NEP/NS2,NS
+25,PB,PB
+26,HA endogenous,HA
+27,NA endogenous,NA
+28,NP endogenous,NP
+29,PA endogenous,PA
+30,PB1 endogenous,PB1
+31,PB2 endogenous,PB2
+32,M1 endogenous,M
+33,M2 endogenous,M
+34,NS1 endogenous,NS
+35,NEP endogenous,NS
+36,HA precursor,HA
+37,P3,PA

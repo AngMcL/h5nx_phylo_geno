@@ -1,0 +1,482 @@
+"","common","latin"
+"1","Goose","Anser sp."
+"2","Goat","Capra hircus"
+"3","American crow","Corvus brachyrhynchos"
+"4","American wigeon","Mareca americana"
+"5","Bald eagle","Haliaeetus leucocephalus"
+"6","Canada goose","Branta canadensis"
+"7","Common raven","Corvus corax"
+"8","Crow",NA
+"9","Duck","Anas platyrhynchos"
+"10","Emu","Dromaius novaehollandiae"
+"11","Great-horned owl","Bubo virginianus"
+"12","Harris's hawk","Parabuteo unicinctus"
+"13","Mallard","Anas platyrhynchos"
+"14","Mountain lion",NA
+"15","Mute swan","Cygnus olor"
+"16","Peregrine falcon","Falco peregrinus"
+"17","Raccoon","Procyon lotor"
+"18","Red-tailed hawk","Buteo jamaicensis"
+"19","Skunk",NA
+"20","Snow goose","Anser caerulescens caerulescens"
+"21","Tiger","Panthera tigris"
+"22","Turkey","Meleagris gallopavo"
+"23","Western gull","Larus occidentalis"
+"24","Western sandpiper","Calidris mauri"
+"25","Cat","Felis catus"
+"26","Cattle","Bos"
+"27","Chicken","Gallus gallus"
+"28","Unknown bird",NA
+"29","Human","Homo sapiens"
+"30","Dove",NA
+"31","Greylag goose","Anser anser"
+"32","Swan",NA
+"33","Great white pelican",NA
+"34","Eurasian goshawk","Accipiter gentilis"
+"35","Great black-backed gull","Larus marinus"
+"36","White stork","Ciconia ciconia"
+"37","Garganey","Spatula querquedula"
+"38","Northern fulmar","Fulmarus glacialis"
+"39","Ostrich","Struthio camelus"
+"40","Pigeon",NA
+"41","Pig","Sus scrofa"
+"42","Black vulture","Coragyps atratus"
+"43","Vulture",NA
+"44","Hawk",NA
+"45","Sandhill crane","Antigone canadensis"
+"46","American green-winged teal","Anas carolinensis"
+"47","Common loon","Gavia immer"
+"48","American blue-winged teal",NA
+"49","American black duck","Anas rubripes"
+"50","American coot","Fulica americana"
+"51","American kestrel","Falco sparverius"
+"52","American white pelican","Pelecanus erythrorhynchos"
+"53","American wood stork",NA
+"54","Arctic tern","Sterna paradisaea"
+"55","Barn owl",NA
+"56","Barred owl",NA
+"57","Black swan","Cygnus atratus"
+"58","Black brant",NA
+"59","Black turnstone","Arenaria melanocephala"
+"60","Black-crowned night heron","Nycticorax nycticorax"
+"61","Black-legged kittiwake","Rissa tridactyla"
+"62","Blue-winged teal","Spatula discors"
+"63","Bonaparte's gull","Chroicocephalus philadelphia"
+"64","Brant goose",NA
+"65","Broad-winged hawk","Buteo platypterus"
+"66","Brown pelican",NA
+"67","Bufflehead","Bucephala albeola"
+"68","Cackling goose","Branta hutchinsii"
+"69","California condor","Gymnogyps californianus"
+"70","Caspian tern","Hydroprogne caspia"
+"71","Cinnamon teal","Spatula cyanoptera"
+"72","Common eider","Somateria mollissima"
+"73","Common tern","Sterna hirundo"
+"74","Cooper's hawk","Accipiter cooperii"
+"75","Cormorant","Phalacrocorax carbo"
+"76","Crested caracara","Caracara plancus"
+"77","Double-crested cormorant","Phalacrocorax auritus"
+"78","Dunlin","Calidris alpina"
+"79","Eagle",NA
+"80","Eared grebe",NA
+"81","Eastern screech owl","Megascops asio"
+"82","Fish crow",NA
+"83","Fisher","Pekania pennanti"
+"84","Gadwall","Mareca strepera"
+"85","Gannet",NA
+"86","Glaucous gull","Larus hyperboreus"
+"87","Great blue heron","Ardea herodias"
+"88","Great egret","Ardea alba"
+"89","Great horned owl","Bubo virginianus"
+"90","Green heron","Butorides virescens"
+"91","Green winged teal","Anas carolinensis"
+"92","Gull",NA
+"93","Herring gull","Larus argentatus"
+"94","Hooded merganser","Lophodytes cucullatus"
+"95","Horned grebe",NA
+"96","Lesser white-fronted goose","Anser erythropus"
+"97","Magpie",NA
+"98","Manx shearwater",NA
+"99","Merganser","Mergus"
+"100","Mottled duck","Anas fulvigula"
+"101","Muscovy duck","Cairina moschata"
+"102","Neotropic cormorant","Phalacrocorax brasilianus"
+"103","Northern gannet","Morus bassanus"
+"104","Northern harrier","Circus hudsonius"
+"105","Northern pintail","Anas acuta"
+"106","Northern shoveler","Spatula clypeata"
+"107","Osprey","Pandion haliaetus"
+"108","Owl","Strigidae"
+"109","Parasitic jaeger",NA
+"110","Pelican","Pelecanus"
+"111","Raptor",NA
+"112","Raven",NA
+"113","Red fox","Vulpes vulpes"
+"114","Red-necked grebe",NA
+"115","Red-necked phalarope","Tringa tobata"
+"116","Red-shouldered hawk","Buteo lineatus"
+"117","Redhead duck",NA
+"118","Ring-billed gull","Larus delawarensis"
+"119","Ring-necked duck","Aythya collaris"
+"120","Ring-necked pheasant",NA
+"121","Roseate spoonbill",NA
+"122","Ross's goose",NA
+"123","Rough-legged hawk","Buteo lagopus"
+"124","Royal tern","Thalasseus maximus"
+"125","Sanderling","Calidris alba"
+"126","Sandwich tern","Thalasseus sandvicensis"
+"127","Sharp-shinned hawk","Accipiter striatus"
+"128","Short-billed gull",NA
+"129","Short-eared owl","Asio flammeus"
+"130","Snowy egret","Egretta thula"
+"131","Snowy owl","Bubo scandiacus"
+"132","Snowy plover","Anarhynchus nivosus"
+"133","Sparrow",NA
+"134","Swainson's hawk","Buteo swainsoni"
+"135","Teal",NA
+"136","Thayer's gull","Larus thayeri"
+"137","Trumpeter swan",NA
+"138","Tundra swan","Cygnus columbianus"
+"139","Turkey vulture","Cathartes aura"
+"140","Waterfowl","Anatidae"
+"141","Western grebe","Aechmophorus occidentalis"
+"142","Western screech owl","Megascops kennicottii"
+"143","Western snowy plover",NA
+"144","White-winged scoter","Melanitta fusca"
+"145","Willet","Tringa semipalmata"
+"146","Wood duck","Aix sponsa"
+"147","Black scoter","Melanitta americana"
+"148","Black skimmer","Rynchops niger"
+"149","Common goldeneye","Bucephala clangula"
+"150","Great-tailed grackle","Quiscalus mexicanus"
+"151","Greater scaup","Aythya marila"
+"152","Lesser scaup","Aythya affinis"
+"153","Lesser snow goose",NA
+"154","Pintail","Anas acuta"
+"155","Common crane",NA
+"156","Harbor seal","Phoca vitulina"
+"157","Glaucous-winged gull","Larus glaucescens"
+"158","Guineafowl","Numididae sp."
+"159","Black-headed gull","Chroicocephalus ridibundus"
+"160","Radjah shelduck",NA
+"161","Pacific black duck","Anas superciliosa"
+"162","Waterbird",NA
+"163","Peafowl",NA
+"164","Environment",NA
+"165","South American sea lion","Otaria byronia"
+"166","Southern elephant seal","Mirounga leonina"
+"167","Seagull",NA
+"168","South American tern","Sterna hirundinacea"
+"169","Eurasian collared dove","Streptopelia decaocto"
+"170","Southern river otter","Lontra provocax"
+"171","South polar skua","Stercorarius maccormicki"
+"172","Guanay cormorant",NA
+"173","Chungungo",NA
+"174","Burmeister's porpoise","Phocoena spinipinnis"
+"175","American robin","Turdus migratorius"
+"176","Brown skua","Stercorarius lonnbergi"
+"177","Southern fulmar",NA
+"178","Kelp gull","Larus dominicanus"
+"179","Antarctic tern","Sterna vittata"
+"180","South Georgia shag","Leucocarbo georgianus"
+"181","Antarctic fur seal","Arctocephalus gazella"
+"182","Common buzzard","Buteo buteo"
+"183","Little grebe","Tachybaptus ruficollis"
+"184","Yellow-legged gull","Larus michahellis"
+"185","Grey heron","Ardea cinerea"
+"186","Indian peafowl","Pavo cristatus"
+"187","Tufted duck","Aythya fuligula"
+"188","Caspian gull","Larus cachinnans"
+"189","Grackle",NA
+"190","Ezo red fox",NA
+"191","Alpaca","Vicugna pacos"
+"192","Mouse","Mus musculus"
+"193","Herons","Ardeidae"
+"194","Chestnut teal","Anas castanea"
+"195","Grey teal","Anas gracilis"
+"196",NA,NA
+"197","South american sea lion","Otaria flavescens"
+"198","Tropical screech owl","Megascops choliba"
+"199","Helmeted guineafowl","Numida meleagris"
+"200","Great black-hawk","Buteogallus urubitinga"
+"201","American golden-plover","Pluvialis dominica"
+"202","Common murre","Uria aalge"
+"203","Short-tailed shearwater","Ardenna tenuirostris"
+"204","Polar bear","Ursus maritimus"
+"205","Green-winged teal","Anas carolinensis"
+"206","Brown bear","Ursus arctos"
+"207","Sabine's gull","Xema sabini"
+"208","Black bear",NA
+"209","Eider",NA
+"210","Band-tailed gull",NA
+"211","Pheasant",NA
+"212","Blackbird","Turdus merula"
+"213","Common pochard","Aythya ferina"
+"214","Pinniped",NA
+"215","Seabird",NA
+"216","Eurasian wigeon","Mareca penelope"
+"217","Greater white-fronted goose",NA
+"218","South American fur seal","Arctocephalus australis"
+"219","Franklin's gull","Leucophaeus pipixcan"
+"220","Common whooper","Cygnus cygnus"
+"221","Coot","Fulica"
+"222","Griffon vulture","Gyps fulvus"
+"223","Bar-headed goose","Anser indicus"
+"224","Common shelduck","Tadorna tadorna"
+"225","Red knot","Calidris canutus"
+"226","Eurasian curlew","Numenius arquata"
+"227","Whistling swan","Cygnus columbianus"
+"228","Peruvian booby","Sula variegata"
+"229","Sea otter","Enhydra lutris"
+"230","Chimango",NA
+"231","Gray gull",NA
+"232","Great grabe",NA
+"233","Black-necked swan","Cygnus melancoryphus"
+"234","Penguin",NA
+"235","Peruvian pelican","Pelecanus thagus"
+"236","Brown-hooded gull","Chroicocephalus maculipennis"
+"237","Chilean dolphin",NA
+"238","White-tailed eagle","Haliaeetus albicilla"
+"239","Humboldt penguin",NA
+"240","Tibetan black bear",NA
+"241","Houbara bustard","Chlamydotis undulata"
+"242","Houbara bustard","Houbara bustard"
+"243","Belcher gull",NA
+"244","Mule duck",NA
+"245","American pelican",NA
+"246","Baikal teal","Sibirionetta formosa"
+"247","Black swift","Cypseloides niger"
+"248","Graylag goose","Anser anser"
+"249","Lesser snow goose blue-morph",NA
+"250","Lesser snow goose white-morph",NA
+"251","Parrot","Psittacidae"
+"252","Gadwall duck",NA
+"253","Dolphin",NA
+"254","Whimbrel",NA
+"255","Blackish oystercatcher","Haematopus ater"
+"256","Elegant tern","Thalasseus elegans"
+"257","Chiloe wigeon","Mareca sibilatrix"
+"258","Silver pheasant","Lophura nycthemera"
+"259","Lion","Panthera leo"
+"260","Eastern buzzard",NA
+"261","Hooded crane","Grus monacha"
+"262","White-naped crane","Antigone vipio"
+"263","Common teal","Anas crecca"
+"264","Striped skunk","Mephitis mephitis"
+"265","Peking duck",NA
+"266","Belcher's gull",NA
+"267","Western barn owl",NA
+"268","Andean guayata",NA
+"269","Purple heron",NA
+"270","Migratory bird",NA
+"271","Northern goshawk","Accipiter gentilis"
+"272","Mandarin duck","Aix galericulata"
+"273","Ruddy turnstone","Arenaria interpres"
+"274","Norway rat","Rattus norvegicus"
+"275","Whooper swan",NA
+"276","White-fronted goose","Anser albifrons"
+"277","Jungle crow","Corvus macrorhynchos"
+"278","Equine","Equus caballus"
+"279","Tern",NA
+"280","Dalmatian pelican","Pelecanus crispus"
+"281","Shelduck",NA
+"282","Aviafauna",NA
+"283","American mink","Neogale vison"
+"284","Bottlenose dolphin",NA
+"285","Eurasian griffon","Gyps fulvus"
+"286","Steller's sea eagle","Haliaeetus pelagicus"
+"287","Ibis",NA
+"288","Red-back shrike",NA
+"289","Greater flamingo","Phoenicopterus roseus"
+"290","Common blackbird",NA
+"291","Marbled duck",NA
+"292","Domestic goose","Anser anser"
+"293","Mink","Neogale vison"
+"294","Swine","Sus scrofa"
+"295","Bean goose","Anser fabalis"
+"296","Emperor goose","Anser canagicus"
+"297","Swan goose","Anser cygnoides"
+"298","Cattle egret","Bubulcus ibis"
+"299","Greenwing duck",NA
+"300","Red-necked stint","Calidris ruficollis"
+"301","Eurasian coot","Fulica atra"
+"302","Falcated teal",NA
+"303","Spot-billed duck",NA
+"304","Rook","Corvus frugilegus"
+"305","Quail",NA
+"306","Whiskered tern","Chlidonias hybrida"
+"307","Moscovy duck",NA
+"308","Thrush",NA
+"309","Egret",NA
+"310","Kestrel falcon",NA
+"311","Ferruginous duck",NA
+"312","Common gull","Cepora nerissa"
+"313","Falcated duck","Mareca falcata"
+"314","African penguin",NA
+"315","Swift tern",NA
+"316","Jackal buzzard","Buteo rufofuscus"
+"317","Cape cormorant","Phalacrocorax capensis"
+"318","Crowned cormorant","Microcarbo coronatus"
+"319","African oystercatcher","Haematopus moquini"
+"320","Hartlaubs gull",NA
+"321","Flamingo","Phoenicopterus roseus"
+"322","Chinstrap penguin","Pygoscelis antarcticus"
+"323","Taiga bean goose","Anser fabalis"
+"324","Common moorhen","Gallinula chloropus"
+"325","Chicken hen",NA
+"326","Starling","Sturnus vulgaris"
+"327","European bee-eater","Merops apiaster"
+"328","Common mallard","Anas platyrhynchos platyrhynchos"
+"329","Mulard duck",NA
+"330","Eurasian collared-dove","Streptopelia decaocto"
+"331","Mexican duck","Anas diazi"
+"332","Egyptian goose","Alopochen aegyptiaca"
+"333","Speckled pigeon","Columba guinea"
+"334","Sacred ibis","Threskiornis aethiopicus"
+"335","Laughing gull","Leucophaeus atricilla"
+"336","Wigeon",NA
+"337","Meerkat","Suricata suricatta"
+"338","Great tit","Parus major"
+"339","Yellow-billed teal","Anas flavirostris"
+"340","White-backed stilt",NA
+"341","White-winged black tern",NA
+"342","Silver teal",NA
+"343","Great crested grebe","Podiceps cristatus"
+"344","Ruddy shelduck","Tadorna ferruginea"
+"345","Rails","Rallidae"
+"346","Shorebird",NA
+"347","Greenfinch",NA
+"348","Bluebird",NA
+"349","Grey-headed gull","Chroicocephalus cirrocephalus"
+"350","Falcon",NA
+"351","Grey goose",NA
+"352","Ferruginous pochard",NA
+"353","Von schrenck's bittern","Ixobrychus eurhythmus"
+"354","Black duck",NA
+"355","Shoveller duck",NA
+"356","Grey-faced buzzard","Butastur indicus"
+"357","Wildfowl",NA
+"358","Oriental magpie robin","Copsychus saularis"
+"359","Peacock","Nymphalis io"
+"360","Sandpiper",NA
+"361","Least sandpiper","Calidris minutilla"
+"362","Swiftlet",NA
+"363","Bewicks swan",NA
+"364","Pallas's sandgrouse","Syrrhaptes paradoxus"
+"365","Migratory waterfowl",NA
+"366","Night heron",NA
+"367","Bulbul",NA
+"368","Swallow",NA
+"369","Partridge",NA
+"370","Turtle dove",NA
+"371","Yellow-billed duck",NA
+"372","White-faced whistling duck","Dendrocygna viduata"
+"373","Black-bellied whistling duck","Dendrocygna autumnalis"
+"374","Yellow-billed pintail","Anas georgica"
+"375","Thick-billed murre",NA
+"376","Dog","Canis lupus familiaris"
+"377","Spur-winged lapwing","Vanellus spinosus"
+"378","Spotted dove","Spilopelia chinensis"
+"379","Little egret","Egretta garzetta"
+"380","Chinese pond heron","Ardeola bacchus"
+"381","Gyrfalcon","Falco rusticolus"
+"382","Breeder duck",NA
+"383","Chicken duck",NA
+"384","Civet cat",NA
+"385","Hill myna","Gracula religiosa"
+"386","Japanese white-eye","Zosterops japonicus"
+"387","Great black-headed gull","Ichthyaetus ichthyaetus"
+"388","Brown-headed gull","Chroicocephalus brunnicephalus"
+"389","Barn swallow","Hirundo rustica"
+"390","European teal","Anas crecca"
+"391","Finch",NA
+"392","Peaceful dove",NA
+"393","Eurasian eagle owl","Bubo bubo"
+"394","Eurasian woodcock","Scolopax rusticola"
+"395","Rosy-billed pochard","Netta peposaca"
+"396","Large-billed crow","Corvus macrorhynchos"
+"397","Canvasback","Aythya valisineria"
+"398","Condor",NA
+"399","Ferret","Mustela putorius furo"
+"400","Marabou stork",NA
+"401","Eurasian sparrowhawk","Accipiter nisus"
+"402","Common kestrel","Falco tinnunculus"
+"403","Buzzard",NA
+"404","Great cormorant","Phalacrocorax carbo"
+"405","Darkling beetle",NA
+"406","Goshawk","Accipiter gentilis"
+"407","Harrier",NA
+"408","Open-bill stork",NA
+"409","Tree sparrow","Passer montanus"
+"410","Snipe",NA
+"411","Spur-winged goose","Plectropterus gambensis"
+"412","Grebe",NA
+"413","Yellow-headed amazon",NA
+"414","Shrike",NA
+"415","Pied megpie",NA
+"416","Goosander",NA
+"417","Lesser kestrel","Falco naumanni"
+"418","Mountain hawk-eagle","Nisaetus nipalensis"
+"419","Crested myna","Acridotheres cristatellus"
+"420","Shearwater",NA
+"421","Pika",NA
+"422","Rooster",NA
+"423","Raccoon dog","Nyctereutes procyonoides"
+"424","Black-neck crane",NA
+"425","Common cormorant","Phalacrocorax carbo"
+"426","Smew","Mergus albellus"
+"427","Black-necked grebe","Podiceps nigricollis"
+"428","Blue goose",NA
+"429","Plateau pika","Ochotona curzoniae"
+"430","Scaly-breasted munia","Lonchura punctulata"
+"431","Crested goshawk","Accipiter trivirgatus"
+"432","White-backed munia","Lonchura striata"
+"433","Blue magpie","Urocissa erythroryncha"
+"434","Silver-eared mesia","Leiothrix argentauris"
+"435","Chestnut munia","Lonchura atricapilla"
+"436","Long-tailed shrike","Lanius schach"
+"437","Red-billed starling","Spodiopsar sericeus"
+"438","Common magpie","Pica pica"
+"439","Daurian starling","Agropsar sturninus"
+"440","Magpie robin",NA
+"441","Common myna","Acridotheres tristis"
+"442","Eagle owl",NA
+"443","Kalij pheasant","Lophura leucomelanos"
+"444","Saker falcon","Falco cherrug"
+"445","Moorhen",NA
+"446","Watercock","Gallicrex cinerea"
+"447","Chukar",NA
+"448","Open-bill ibis",NA
+"449","Little cuckoo-dove",NA
+"450","Clouded leopard","Neofelis nebulosa"
+"451","Common coot","Fulica atra"
+"452","Babbler",NA
+"453","Golden mountain thrush",NA
+"454","Black bulbul",NA
+"455","Curlew",NA
+"456","Slaty-backed gull","Larus schistisagus"
+"457","Migratory duck",NA
+"458","Fowl",NA
+"459","Golden pheasant","Chrysolophus pictus"
+"460","Gray-crowed crane",NA
+"461","Great barbet","Psilopogon virens"
+"462","Green peafowl","Pavo muticus"
+"463","Hooded vulture","Necrosyrtes monachus"
+"464","Pochard","Aythya ferina"
+"465","Stork",NA
+"466","Stone marten",NA
+"467","Owston's civet",NA
+"468","Goldeneye duck",NA
+"469","Munia",NA
+"470","Robin","Erithacus rubecula"
+"471","Crested eagle","Morphnus guianensis"
+"472","Blow fly","Calliphoridae"
+"473","White peafowl",NA
+"474","Kalji pheasant",NA
+"475","Rollers",NA
+"476","Mynas",NA
+"477","Black-headed goose",NA
+"478","Embryonated chicken egg",NA
+"479","Hatay",NA
+"480","Leopard","Panthera pardus"
+"481","Open-bill",NA
