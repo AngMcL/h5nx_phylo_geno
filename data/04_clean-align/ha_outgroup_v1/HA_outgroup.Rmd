@@ -1,0 +1,51 @@
+---
+title: "An outgroup, but why?"
+output: html_document
+date: "2025-05-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## libs
+```{r}
+library(tidyverse)
+library(gtools)
+```
+## Read in the metadata for HA and list of outgroups
+```{r}
+# meta<-read.csv("../../../../../data/02_merge/2025-04-02_merged/merged_meta/merged_meta_HA.csv"
+meta<-read.csv("../../../../../data/04_clean-align/2025-04-10_clean-aligns-out/cleaned_meta/merged_meta_HA.csv")
+resid<-read.csv("../../../../01_fasttrees/ft_root_outlier/2025-04-10_rem-outliers/rem_out/nodup_filt_trim_nuc_HA_rooted_resid.csv")
+outs<-read.csv("ha_ougroup_ids.csv", header=F, sep=",")
+outs <- outs %>% unite(Accession, V1, V2, remove = F)
+outs.a<-outs$Accession
+outs.n<-outs$V2
+
+# head(meta$nucname)
+# head(meta$isolate_name)
+# head(meta)
+# meta.2<-meta %>% filter(-keep == 0)
+meta.a<-meta %>% separate(nucname, c("Access","Date","Seg"), sep="\\|",remove = F)
+head(meta.a)
+
+str_which(meta.a$Access , paste(outs.a, collapse="|"))
+str_which(meta.a$isolate_name,outs.a[1])
+str_which(meta.a$nucname,as.character(outs.n[1]))
+str_which(meta.a$isolate_name,"2.27_XXHM004-E")
+meta.3$Access
+
+head(resid)
+match.out<-str_which(resid$nucname , paste(outs.a, collapse="|"))
+resid.out<-resid[match.out,]
+resid.out$segment_id
+#why are there two comma sepd?
+resid.out<-resid.out %>% separate(segment_id, c("seg_id1","seg_id2"), sep=", ", remove=F)
+resid.out
+
+str_subset(meta.a$segment_id, ", ")
+str_which(meta.a$segment_id,resid.out$segment_id[1])
+# str_which(meta.a$isolate_name,"2.27_XXHM004-E")
+```
+

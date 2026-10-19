@@ -1,0 +1,517 @@
+---
+title: "Trim and clean alignments of gaps, Ns/low coverage, identicals within species"
+output: github_document
+date: "2025-03-27"
+---
+
+# objectives
+* filter/clean nucleotide and protein alignments
+	- rm sequences with <50% coverage and >10% ambiguous (export trim_filt)
+  - rm identical seqs within each segment and each species/country/year (export nodup_trim_filt)
+  - track removed replicated seqs
+* count and plot n identical seqs within species
+
+## changes
+### 20260108 v2
+* purrrify
+* fixed issue with mismatches in what was sample-identifying in ncbi and gisaid
+  - used gisaid_meta$isolate_id as its sample, before the merge, so then was able to replace entirely use of isolate_name for sample grouping (need to make this change in all related downstream scripts of merge)
+
+
+### 2025-09-04
+* split the _seg and _wg scripts, to focus on data filter based on complete genomes, and removal of identical seqs across whole genome (wg) instead of segment, and within species not species/country/year
+* change output folder and objects names; and main files are wg not seg duplicates
+* remove redundancy of wg and seg identicals (no longer doing seg identicals)
+* fix remaining re-naming issues with host
+
+## to do
+* update lookup table of species common names, latin, (and fill in other taxa levels)
+* apply the host re-naming to protein meta (or just ignore, b/c can still link back to nuc.meta through sample id)
+
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libs
+```{r, message=F}
+library(Biostrings)
+library(tidyverse)
+library(gtools)
+library(NatParksPalettes)
+```
+
+## Ins and Outs
+```{r}
+# Input merged/aligned/trimmed sequences
+f.in.fasta<-paste0("../03_align/01_trimmed/2026-01-12_trimmed/")
+nuc.fasta.in<-list.files(f.in.fasta,pattern="nuc",full.names=T) %>% mixedsort()
+prot.fasta.in<-list.files(f.in.fasta,pattern="protein",full.names=T) %>% mixedsort()
+
+# Input merged metadata
+f.in.meta<-paste0("../02_merge/2026-01-08_merged/merged_meta/")
+nuc.meta.in<-list.files(f.in.meta,pattern="*merged_meta*",full.names=T) %>% mixedsort()
+prot.meta.in<-list.files(f.in.meta,pattern="*merged_protein_meta*",full.names=T) %>% mixedsort()
+prot.meta.in<-prot.meta.in[order(str_replace_all(prot.meta.in,"-",""))]
+
+# lookup protein and nuc segments
+lookup.prot.in<-"../01a_ncbi/clean_ncbi/lookups/prot.nm.segment.csv"
+
+# HA outgroup issue identified in v1
+# ha.out.in<-"../../../h5nx_genomic_ml/phylo/nodup_seg/02_iqtrees/ha_outgroup/ha_ougroup_ids.csv"
+ha.out.in<-"ha_outgroup_v1/ha_outgroup_ids.csv"
+
+# Output
+today<-Sys.Date()
+f.out<-paste0(today,"_clean_aligns_wg_out/")
+f.out.fig<-paste0(f.out,"cleaned_figs/")
+f.out.meta<-paste0(f.out,"cleaned_meta/")
+f.out.fasta<-paste0(f.out,"cleaned_fasta/")
+
+if(!dir.exists(f.out)){dir.create(f.out)}
+if(!dir.exists(f.out.fig)){dir.create(f.out.fig)}
+if(!dir.exists(f.out.meta)){dir.create(f.out.meta)}
+if(!dir.exists(f.out.fasta)){dir.create(f.out.fasta)}
+
+segments0<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+segments<-segments0 %>% mixedsort()
+mix<-str_split(nuc.fasta.in,"_|\\.") %>% unlist
+segments<-segments[which(segments %in% mix)]
+l.seg<-length(segments)
+
+prot.ord<-c("PB2","PB1","PB1-F2","PA-X","PA","HA","NP","NA","M1","M2","NEP","NS1") %>% mixedsort()
+mix.p<-str_split(prot.fasta.in,"_|\\.") %>% unlist
+prot.ord<-prot.ord[which(prot.ord %in% mix.p)]
+l.prot<-length(prot.ord)
+
+nuc.meta.out<-str_replace_all(nuc.meta.in,f.in.meta,f.out.meta) %>%
+  str_replace_all("merged","merged_cleaned")
+nuc.meta.out.filt<-str_replace_all(nuc.meta.out,"merged_cleaned","merged_cleaned_filt")
+# nuc.meta.rep.out<-str_replace_all(nuc.meta.out,"merged_cleaned","merged_cleaned_replicated")
+
+nuc.fasta.out0<-str_replace_all(nuc.fasta.in,f.in.fasta,f.out.fasta)
+nuc.fasta.out.filt<-str_replace_all(nuc.fasta.out0,"trim","trim_filt")
+nuc.fasta.out<-str_replace_all(nuc.fasta.out0,"trim","trim_nodup")
+
+prot.meta.out<-str_replace_all(prot.meta.in,f.in.meta,f.out.meta) %>%
+  str_replace_all("merged","merged_cleaned")
+prot.fasta.out0<-str_replace_all(prot.fasta.in,f.in.fasta,f.out.fasta)
+prot.fasta.out<-str_replace_all(prot.fasta.out0,"trim","trim_nodup")
+
+text.out<-paste0(f.out,today,"_logfile.txt")
+cat(paste0("Run date: ",today),file=text.out,sep="\n",append=F)
+```
+
+## Plotting themes
+```{r}
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"),
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8))
+plot.theme.date<-plot.theme+
+  theme(axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+
+# Segment colors
+segment.cols<-natparks.pals(name="Yellowstone", n=length(segments))
+segment.cols<-segment.cols[c(1,5,2,4,6,3,8,7)]
+names(segment.cols)<-segments0
+```
+
+## helper function: filter a meta df to match fasta headers
+```{r}
+filter_meta_to_fasta<-function(fasta.file,meta.file,seq_new.col="seq_new"){
+  x<-Biostrings::readDNAStringSet(fasta.file)
+  m<-read.csv(meta.file)
+  if(!seq_new.col %in% colnames(m)){
+    stop(paste0("Column ",seq_new.col," not found in meta: ",meta.file))
+  }
+  keep<-m[[seq_new.col]] %in% names(x) #keepers match
+  list(nuc = x[names(x) %in% m[[seq_new.col]][keep]],
+    meta = m[keep,], 
+    missing = m[!keep,])
+}
+
+```
+
+## set up fasta and meta, thresholds
+```{r}
+# remove seq if >10% ambiguous (low qual) or <50% coverage after trimming gaps
+min.seq.cov<-0.5
+max.seq.ambig<-0.1
+
+# IUPAC ambiguous nuc letters
+ambig<-c("N", "B", "D", "H", "V", "K", "Y", "S", "W", "R", "M")
+
+#set up empty lists for nuc and meta to read an element for each segment
+nuc.meta<-nuc<-replicate(n=l.seg, vector())
+# nuc.meta.rep<-replicate(n=l.seg, vector())
+```
+
+## read in the trimmed fasta
+```{r}
+## read in trimmed fasta AND restrict meta to match what's aligned
+missing.meta<-replicate(n=l.seg,vector())
+
+for(i in 1:l.seg){
+  tmp<-filter_meta_to_fasta(nuc.fasta.in[i],nuc.meta.in[i],seq_new.col="seq_new")
+  nuc[[i]]<-tmp$nuc
+  nuc.meta[[i]]<-tmp$meta
+  missing.meta[[i]]<-tmp$missing
+  stopifnot(length(nuc[[i]])==nrow(nuc.meta[[i]]))
+
+  ## remove nucleotide seqs with too many ambig or too low coverage
+  ambig.p<-letterFrequency(nuc[[i]],ambig,as.prob=T)
+  gap.p<-letterFrequency(nuc[[i]],"-",as.prob=T)
+
+  too.many.n<-which(ambig.p>max.seq.ambig)
+  too.short<-which((1-gap.p)<min.seq.cov)
+  rem.short.n<-unique(c(too.many.n,too.short))
+
+  if(length(rem.short.n)>0){
+    cut.names<-names(nuc[[i]][rem.short.n])
+    metamatch<-which(nuc.meta[[i]]$seq_new %in% cut.names)
+    if(length(metamatch)>0){
+      nuc.meta[[i]]<-nuc.meta[[i]][-metamatch,] }
+    nuc[[i]]<-nuc[[i]][!names(nuc[[i]]) %in% cut.names]
+  }
+
+  cat(paste0("Segment ",segments[i],
+             ": meta–fasta prefilter mismatch removed = ",
+             nrow(tmp$missing),
+             "; Ambig > ",max.seq.ambig," = ",length(too.many.n),
+             "; Coverage < ",min.seq.cov," = ",length(too.short)),
+      file=text.out,sep="\n",append=T)
+}
+
+# Checkpoint: export seqs with minimum length and max %N (still has identicals)
+for(i in 1:l.seg){
+  Biostrings::writeXStringSet(nuc[[i]],nuc.fasta.out.filt[i])
+  write.csv(nuc.meta[[i]],nuc.meta.out.filt[i],row.names=F)
+}
+```
+
+# Restrict to those with all 8 segments and no identical wgs within species
+## Restrict to sample with all 8 segments
+```{r}
+nuc.meta.all<-bind_rows(nuc.meta)
+nuc.meta.all$segment[which(is.na(nuc.meta.all$segment))]<-"NA"
+t.seg<-table(nuc.meta.all$segment)
+write.csv(as.data.frame(t.seg),paste0(f.out.fig,"n.seq.excl-low-cov-high-ambig.csv"),row.names=F)
+
+t<-table(nuc.meta.all$sample)
+complete.samples<-names(t)[which(as.integer(t)==l.seg)]
+length(complete.samples)
+
+meta.complete<-nuc.meta.all %>% filter(sample %in% complete.samples)
+meta.complete$segment[which(is.na(meta.complete$segment))]<-"NA"
+t.comp<-table(meta.complete$segment)
+write.csv(as.data.frame(t.comp),
+          paste0(f.out.fig,"n.seq.excl-low-cov-high-ambig_completesamp.csv"), row.names=F)
+
+```
+
+## Find identical genomes from the same species:
+```{r}
+nuc.complete<-nuc[[1]][0] #blank
+
+seg.levels<-segments
+meta.key<-nuc.meta.all %>%
+  mutate(segment=factor(segment,levels=seg.levels)) %>%
+  filter(sample %in% complete.samples) %>%
+  arrange(sample,segment)
+
+for(j in 1:length(complete.samples)){
+  samp<-complete.samples[j]
+  mynuc<-meta.key$seq_new[meta.key$sample==samp]
+  
+  temp<-replicate(n=l.seg,vector())
+  for(i in 1:l.seg){
+    hit<-which(names(nuc[[i]])==mynuc[i])
+    if(length(hit)!=1){stop(paste0("Missing/duplicate seq_new for sample=",samp," seg=",segments[i]))}
+    temp[[i]]<-nuc[[i]][hit]
+  }
+  fullnuc<-do.call(Biostrings::xscat,temp)
+  names(fullnuc)<-samp
+  nuc.complete<-c(nuc.complete,fullnuc)
+}
+
+length(nuc.complete)
+```
+
+# Remove duplicated data
+## Find identicals within host (common) species
+```{r}
+dup<-which(Biostrings::duplicated(nuc.complete))
+tot.dup<-length(dup)
+tot.dup/length(nuc.complete)
+
+nuc.meta.sample<-data.frame(sample=complete.samples,
+replicated=0,n.rep.tot=NA,keep=0,keepID=NA,n.rep=NA,rep.id=NA)
+
+nuc.meta.sample<-left_join(nuc.meta.sample,nuc.meta[[1]][,c("sample","host")],by="sample")
+
+for(j in 1:tot.dup){
+  if(nuc.meta.sample$replicated[dup[j]]==1){next}
+  same.seqs<-which(nuc.complete==nuc.complete[dup[j]])
+  nuc.meta.sample$replicated[same.seqs]<-1
+  nuc.meta.sample$n.rep.tot[same.seqs]<-length(same.seqs)
+  nuc.meta.sample$rep.id[same.seqs]<-as.character(j)
+  nuc.temp<-nuc.meta.sample[same.seqs,] %>% count(host)
+  colnames(nuc.temp)[2]<-"n.rep"
+  #loop through rows restr to same seqs 
+  for(k in 1:nrow(nuc.temp)){
+    grp<-which(nuc.meta.sample$host[same.seqs]==nuc.temp$host[k])
+    all.nm<-nuc.meta.sample$sample[same.seqs[grp]] %>% sort 
+    #TO DO next build: add date, sort by date, and choose seqeunce with earliest detection as most epidemiologically informative
+    nuc.meta.sample$keep[which(nuc.meta.sample$sample==all.nm[1])]<-1
+    nuc.meta.sample$keepID[which(nuc.meta.sample$sample %in% all.nm)]<-all.nm[1]
+    nuc.meta.sample$n.rep[which(nuc.meta.sample$sample %in% all.nm)]<-nuc.temp$n.rep[k]
+  }
+}
+
+table(nuc.meta.sample$replicated)
+table(nuc.meta.sample$keep[nuc.meta.sample$replicated==1])
+```
+
+## Remove HA outgroup (not H5) identified in prev build
+```{r}
+ha.rem<-read.csv(ha.out.in,header=F)
+ha.rem<-ha.rem %>% unite("sample",V1,V2)
+ha.seg.id<-which(segments=="HA") #need the HA seg to be present for this loop
+if(length(ha.seg.id)!=1){stop("HA not found in segments")}
+ss.ha<-c()
+for(j in 1:nrow(ha.rem)){
+  ss<-str_which(nuc.meta[[ha.seg.id]]$seq_new,ha.rem[j,1])
+  if(length(ss)>0){
+    ss.samp<-nuc.meta[[ha.seg.id]]$sample[ss]
+    ss.ha<-c(ss.ha,ss.samp)
+  }
+}
+ss.ha<-unique(ss.ha)
+
+# remove suspect samples from all data
+if(length(ss.ha)>0){
+  nuc.meta.sample<-nuc.meta.sample %>% filter(!sample %in% ss.ha)
+}
+
+#14 samples were removed as suspected not H5
+```
+
+## Remove duplicated seqs within species 
+```{r}
+nuc.meta.wg<-nuc.wg<-replicate(n=l.seg,vector())
+
+nuc.meta.sample<-nuc.meta.sample %>% 
+  unite("rep.keep",replicated,keep,remove=F)
+
+nuc.meta.sample.less<-nuc.meta.sample %>%  #the keeprs
+  filter(rep.keep!="1_0")
+keep.samp<-nuc.meta.sample.less$sample
+
+nuc.meta.sample.rem<-nuc.meta.sample %>%  #the removed ones
+  filter(rep.keep=="1_0")
+rem.samp<-nuc.meta.sample.rem$sample
+remo<-length(rem.samp) #18,448
+
+cat(paste0("N identical genomes within species removed: ",remo),
+file=text.out,sep="\n",append=T)
+
+for(i in 1:l.seg){
+  nuc.meta.wg[[i]]<-nuc.meta[[i]] %>% filter(sample %in% keep.samp)
+  nuc.wg[[i]]<-nuc[[i]][names(nuc[[i]]) %in% nuc.meta.wg[[i]]$seq_new]
+  stopifnot(nrow(nuc.meta.wg[[i]])==length(nuc.wg[[i]]))
+  
+  Biostrings::writeXStringSet(nuc.wg[[i]],nuc.fasta.out[i])
+  write.csv(nuc.meta.wg[[i]],nuc.meta.out[i],row.names=F)
+  
+  # nuc.meta.rep[[i]]<-nuc.meta[[i]] %>% filter(sample %in% rem.samp)
+  # write.csv(nuc.meta.rep[[i]],nuc.meta.rep.out[i],row.names=F)
+}
+
+temp.meta<-bind_rows(nuc.meta.wg)
+table.fin<-table(temp.meta$segment)
+write.csv(as.data.frame(table.fin),
+          paste0(f.out.fig,"n.seq.noambig-lowcov.nodupgenomes-spec.csv"),row.names=F)
+write.csv(nuc.meta.sample,
+          paste0(f.out.fig,"nuc.meta.sample.summary.csv"),row.names=F)
+```
+
+## Plot the number of duplicated genomes
+```{r}
+# distribution of n.rep and n.rep.tot (histogram)
+nuc.meta.sample %>% 
+  filter(replicated==1) %>% #only show rep
+  filter(keep==1) %>% #one one representative
+  ggplot()+
+  geom_bar(aes(x=n.rep, fill=host))+
+  coord_cartesian(xlim=c(0,20))+
+  labs(x="N identical sequences within species", y="N species groups of identical seqs")+
+  scale_fill_viridis_d(option = "F")+
+  plot.theme+
+  theme(legend.position = "none")
+ggsave(paste0(f.out.fig,"N_replicated-species.png"), width=7,height=3, units="in")
+
+## plot of n before and after n sequence
+temp.df<-nuc.meta.sample %>% 
+  dplyr::summarise(n.incl.reps=n(),
+                   n.reps=length(which(replicated==1)),
+                   n.remove=length(which(replicated==1 & keep==0)),
+                   n.excl.reps=n.incl.reps-n.remove)
+temp.df.l<-temp.df %>% pivot_longer(1:4)
+temp.df.l$name<-factor(temp.df.l$name,levels=c("n.incl.reps", "n.reps","n.remove","n.excl.reps"))
+temp.df.l %>% 
+  ggplot()+
+  geom_col(aes(y=value,x=name,group=name,fill=name), position="dodge")+
+  labs(y="N sequences")+
+  scale_fill_manual(values=natparks.pals(name="Yosemite"))+
+  plot.theme+
+  theme(legend.position = "none")+
+  labs(x=NULL)
+
+ggsave(paste0(f.out.fig,"n.total.removedups.final.png"), width=3,height=3, units="in")
+```
+
+# Summary plots of nuc.meta without excluding replicates
+## Plot the number of duplicated sequences
+```{r}
+all.meta<-bind_rows(nuc.meta.sample.less)
+
+all.meta.host<-all.meta %>% 
+  filter(replicated==1) %>%
+  dplyr::group_by(rep.id) %>%
+  dplyr::summarize(.groups = "rowwise",
+            n.rep.tot=n.rep.tot[1],
+            n.host=length(unique(host)),
+            hosts=paste(unique(host),collapse=", "))
+
+all.meta.host2<-all.meta.host %>% filter(n.host>2)
+# all.meta.host2
+# all.meta.host2$hosts[all.meta.host2$n.host>3]
+# [1] "Unknown bird, Chicken, Duck, Goose"               "Unknown bird, American buff goose, Chicken, Duck"
+# all.meta.host2$hosts[all.meta.host2$n.host>2]
+# all.meta.host2<-all.meta.host2 [order(all.meta.host2$n.rep.tot),]
+
+all.meta.host %>%
+  ggplot()+
+  geom_histogram(aes(x=(n.host)))+
+  labs(x="N hosts within same seqs", y="N replicated seq sets")+
+  plot.theme
+ggsave(paste0(f.out.fig,"N_replicated-host.png"), width=3,height=3, units="in")
+
+## Plot the hosts for the ones with 2+ or 3+
+# all.meta.host2$hosts
+
+# all.meta.host2
+all.meta.host2 %>%
+  ggplot()+
+  geom_bar(aes(x=hosts, y=n.rep.tot, fill=rep.id),stat="identity")+
+  labs(x="Hosts with same wg seqs [>2 hosts]", y="N replicated wg seqs")+
+  plot.theme.date+
+  theme(legend.position = "none",
+        plot.margin = margin(2,2,2,30,"mm"))+
+  scale_fill_viridis_d(option = "E")+
+  theme(axis.text.x=element_blank())
+ggsave(paste0(f.out.fig,"N_replicated-host_2.png"), width=6,height=6, units="in")
+
+```
+
+# Protein sequences
+## Read in data 
+```{r}
+prot.meta<-prot<-replicate(n=l.prot, vector())
+
+for (i in 1:l.prot){
+  prot.meta[[i]]<-read.csv(prot.meta.in[i])
+  prot[[i]]<-Biostrings::readAAStringSet(prot.fasta.in[i])
+}
+```
+
+## Restrict protmeta and prots to only those in final meta after removals above
+```{r}
+lookup.prot<-read.csv(lookup.prot.in)
+
+for(i in 1:l.prot){
+  l.pro.i<-nrow(prot.meta[[i]])
+  prot.keep<-which(prot.meta[[i]]$sample %in% keep.samp)
+  prot.meta[[i]]<-prot.meta[[i]][prot.keep,]
+  prot[[i]]<-prot[[i]][names(prot[[i]]) %in% prot.meta[[i]]$newname]
+  l.pro.f<-nrow(prot.meta[[i]])
+  cat(paste0(prot.ord[i]," nrow prot.meta: inital = ",l.pro.i,"; final = ",l.pro.f),
+  file=text.out,sep="\n",append=T)
+  stopifnot(all(prot.meta[[i]]$newname %in% names(prot[[i]])))
+}
+```
+
+##Restrict proteins to final keep.samples 
+```{r}
+lookup.prot<-read.csv(lookup.prot.in)
+
+for(i in 1:l.prot){
+  l.pro.i<-nrow(prot.meta[[i]])
+  prot.keep<-which(prot.meta[[i]]$sample %in% keep.samp)
+  prot.meta[[i]]<-prot.meta[[i]][prot.keep,]
+  prot[[i]]<-prot[[i]][names(prot[[i]]) %in% prot.meta[[i]]$newname]
+  l.pro.f<-nrow(prot.meta[[i]])
+  cat(paste0(prot.ord[i]," nrow prot.meta: inital = ",l.pro.i,"; final = ",l.pro.f),
+  file=text.out,sep="\n",append=T)
+  stopifnot(all(prot.meta[[i]]$newname %in% names(prot[[i]])))
+}
+```
+
+## Export final protein and protmeta
+```{r}
+for(i in 1:l.prot){
+  write.csv(prot.meta[[i]],prot.meta.out[i],row.names=F)
+  Biostrings::writeXStringSet(prot[[i]],prot.fasta.out[i])
+}
+```
+
+# Summary of identical frequencies
+```{r}
+singles<-length(which(nuc.meta.sample.less$replicated==0))
+dups<-length(unique(nuc.meta.sample.less$rep.id[nuc.meta.sample.less$replicated==1]))
+p.dup<-round(dups/(singles+dups)*100,digits=1)
+cat(paste0("Percent duplicated whole genome sequences of cleaned aligns = ",p.dup,"%"),
+file=text.out,sep="\n",append=T)
+
+all.meta<-bind_rows(nuc.meta.wg)
+
+all.meta.host<-nuc.meta.sample.less %>%
+  filter(replicated==1) %>%
+  group_by(rep.id) %>%
+  summarize(.groups="drop",
+    n.rep.tot=n.rep.tot[1],
+    n.host=length(unique(host)),
+    hosts=paste(unique(host),collapse=", "))
+
+dup.mult<-length(which(all.meta.host$n.host>1))
+p.dup.mult<-round(dup.mult/dups*100,digits=1)
+cat(paste0("Percent of duplicated wgs with multiple hosts = ",p.dup.mult,"%"),
+file=text.out,sep="\n",append=T)
+```
+
+## export data formatted for genoflu
+```{r}
+f.out.fasta.samp<-paste0(f.out.fasta,"genoflu/")
+if(!dir.exists(f.out.fasta.samp)){dir.create(f.out.fasta.samp)}
+samp<-keep.samp
+samp.nuc.wg<-replicate(vector(),n=l.seg)
+samp.nuc.fasta.out<-paste0(f.out.fasta.samp,"s",
+                           as.character(1:length(samp)),".fasta")
+geno_sample_df<-data.frame(geno_sample=paste0("s",as.character(1:length(samp))),
+iso_name=samp)
+write.csv(geno_sample_df,paste0(f.out,"geno_sample.csv"),row.names=F)
+
+for(i in 1:l.seg){
+  for(j in 1:length(samp)){
+    temp<-nuc.meta.wg[[i]] %>% filter(sample %in% samp[j])
+    samp.nuc.wg[[i]]<-nuc.wg[[i]][names(nuc.wg[[i]]) %in% temp$seq_new]
+    if(i==1){Biostrings::writeXStringSet(
+      samp.nuc.wg[[i]],samp.nuc.fasta.out[j],append=F)}
+    if(i>1){Biostrings::writeXStringSet(
+      samp.nuc.wg[[i]],samp.nuc.fasta.out[j],append=T)}
+  }
+}
+```
+

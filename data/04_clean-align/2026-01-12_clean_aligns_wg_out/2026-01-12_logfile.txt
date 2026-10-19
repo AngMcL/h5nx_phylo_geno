@@ -1,0 +1,36 @@
+Run date: 2026-01-12
+Segment HA: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 82; Coverage < 0.5 = 421
+Segment M: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 12; Coverage < 0.5 = 331
+Segment NA: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 32; Coverage < 0.5 = 373
+Segment NP: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 24; Coverage < 0.5 = 412
+Segment NS: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 35; Coverage < 0.5 = 345
+Segment PA: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 147; Coverage < 0.5 = 571
+Segment PB1: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 543; Coverage < 0.5 = 620
+Segment PB2: meta–fasta prefilter mismatch removed = 0; Ambig > 0.1 = 219; Coverage < 0.5 = 585
+N identical genomes within species removed: 18448
+HA nrow prot.meta: inital = 61351; final = 30759
+M1 nrow prot.meta: inital = 61028; final = 30768
+M2 nrow prot.meta: inital = 60706; final = 30752
+NA nrow prot.meta: inital = 61357; final = 30754
+NEP nrow prot.meta: inital = 61166; final = 30764
+NP nrow prot.meta: inital = 61388; final = 30769
+NS1 nrow prot.meta: inital = 61206; final = 30771
+PA nrow prot.meta: inital = 61295; final = 30742
+PA-X nrow prot.meta: inital = 51475; final = 24699
+PB1 nrow prot.meta: inital = 60979; final = 30708
+PB1-F2 nrow prot.meta: inital = 58294; final = 29296
+PB2 nrow prot.meta: inital = 61268; final = 30735
+HA nrow prot.meta: inital = 30759; final = 30759
+M1 nrow prot.meta: inital = 30768; final = 30768
+M2 nrow prot.meta: inital = 30752; final = 30752
+NA nrow prot.meta: inital = 30754; final = 30754
+NEP nrow prot.meta: inital = 30764; final = 30764
+NP nrow prot.meta: inital = 30769; final = 30769
+NS1 nrow prot.meta: inital = 30771; final = 30771
+PA nrow prot.meta: inital = 30742; final = 30742
+PA-X nrow prot.meta: inital = 24699; final = 24699
+PB1 nrow prot.meta: inital = 30708; final = 30708
+PB1-F2 nrow prot.meta: inital = 29296; final = 29296
+PB2 nrow prot.meta: inital = 30735; final = 30735
+Percent duplicated whole genome sequences of cleaned aligns = 35.4%
+Percent of duplicated wgs with multiple hosts = 4.6%
