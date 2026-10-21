@@ -1,0 +1,521 @@
+---
+title: "Global maps of genotype assignment completeness by region"
+author: "Angela"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Objectives
+* Map % of samples assigned a genotype by each method (GenoFlu, Genin2) across global regions
+* Region polygons are country polygons dissolved to UN subregions, filled by % assigned
+* One map file per method (since 2020, matching the assignment-rate panel in compare_genotyping)
+
+Modern GIS stack: `sf` + `rnaturalearth` (country polygons) + `countrycode` (name->ISO3 join).
+`maptools`/`rgeos`/`rgdal` are retired (removed from CRAN) and are not used.
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(gtools)
+library(sf)
+library(rnaturalearth)
+library(countrycode)
+library(ggrepel)     # repel overlapping region labels
+library(scatterpie)  # per-region genotype pies on the map
+library(RColorBrewer)
+
+sf_use_s2(FALSE)  # planar ops for dissolve/centroid; avoids s2 edge errors on subregion unions
+
+# Robinson projection (standard for world maps)
+crs_robin <- "+proj=robin +lon_0=0 +datum=WGS84 +units=m +no_defs"
+
+plot.theme <- theme(
+  panel.grid.minor = element_blank(),
+  panel.background = element_rect("grey95"),
+  axis.line        = element_line(colour = "black"),
+  text             = element_text(size = 10, face = "bold"),
+  legend.text      = element_text(size = 8),
+  axis.text.x      = element_text(angle = 45, hjust = 1, vjust = 1)
+)
+```
+
+```{r paths}
+# per-sample combined output from compare_genotyping (has region, collection_date, assigned flags)
+# NB: use sort(), not gtools::mixedsort(), to pick the newest dated folder.
+# mixedsort() reads the dashes in "2026-06-25" as minus signs (month -> -06), which
+# reverses the date order so tail(1) would grab the OLDEST file. ISO dates sort
+# chronologically under plain sort().
+f.combined <- list.files(".", pattern = "combined_genotyping_meta\\.csv",
+                         recursive = TRUE, full.names = TRUE) %>% sort() %>% tail(1)
+cat("combined input:", f.combined, "\n")
+
+# country -> region lookups (union of NCBI + GISAID for max country coverage)
+f.lookup <- c("../../01a_ncbi/clean_ncbi/lookups/country_continent.csv",
+              "../../01b_gisaid/clean_gisaid/lookups/country_continent.csv")
+
+f.out <- paste0(Sys.Date(), "_map/")
+if (!dir.exists(f.out)) dir.create(f.out)
+
+# small export size (kept at 300 dpi) for later cowplot/magick compositing
+map_w <- 7
+map_h <- 4.1
+```
+
+```{r region-setup}
+region_ord <- c(
+  "Western Europe", "Northern Europe", "Southern Europe", "Eastern Europe",
+  "Western Africa", "Northern Africa", "Southern Africa", "Eastern Africa", "Middle Africa",
+  "Western Asia", "Central Asia", "Southern Asia", "South-Eastern Asia", "Eastern Asia",
+  "North America", "Central America", "Caribbean", "South America",
+  "Oceania", "Antarctica"
+)
+```
+
+## Read data and compute % assigned by region (since 2020)
+
+```{r read-assign, message=FALSE}
+# all samples with a valid region. Filter on collection_year, not collection_date:
+# every sample has at least a year, but collection_date is blank when the original date
+# is incomplete (year-only "2020" or year-month "2020-04"), so date-based filters silently
+# drop those partial-date records (incl. many 2020+ samples).
+samp <- read_csv(f.combined, col_types = cols(.default = "c")) %>%
+  mutate(collection_year  = as.integer(collection_year),
+         assigned_genin   = assigned_genin   == "TRUE",
+         assigned_genoflu = assigned_genoflu == "TRUE") %>%
+  filter(region %in% region_ord)
+
+# % assigned by region, 2020-2025 only (drives the pct maps)
+reg_assign <- samp %>%
+  filter(collection_year >= 2020) %>%
+  group_by(region) %>%
+  summarise(
+    n           = n(),
+    pct_genin   = mean(assigned_genin)   * 100,
+    pct_genoflu = mean(assigned_genoflu) * 100,
+    .groups = "drop"
+  )
+
+reg_assign
+```
+
+## Build region polygons (countries dissolved to UN subregions)
+
+```{r build-regions, message=FALSE, warning=FALSE}
+# country -> region from the project lookups; route names through ISO3 for a robust join
+lookup <- f.lookup %>%
+  map_dfr(~read_csv(.x, col_types = cols(.default = "c"))) %>%
+  transmute(country, region,
+            iso3 = countrycode(country, "country.name", "iso3c", warn = FALSE)) %>%
+  filter(!is.na(iso3)) %>%
+  distinct(iso3, .keep_all = TRUE)
+# NB: NCBI ("USA") and GISAID ("United States") both normalise to ISO3 "USA", so distinct()
+# safely collapses them to one polygon (verified: no ISO3 maps to >1 region across the lookups).
+# 5 entries fail to resolve to an ISO3 and so get NO coloured polygon (drawn as grey basemap):
+# Kosovo (countrycode lacks a default iso3c match) + Torgersen/Roberts/Livingston/Gough Island
+# (sub-Antarctic islets absent from Natural Earth's country layer). Their samples still count
+# toward their region's stats, which aggregate on the pre-assigned `region` column, not ISO3.
+
+# Natural Earth country polygons; iso_a3_eh fixes the -99 codes (France, Norway, ...)
+world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  mutate(iso3 = if_else(is.na(iso_a3_eh) | iso_a3_eh == "-99", adm0_a3, iso_a3_eh)) %>%
+  left_join(lookup %>% select(iso3, region), by = "iso3")
+
+# dissolve countries into one multipolygon per region, then project to Robinson
+region_poly <- world %>%
+  filter(!is.na(region)) %>%
+  group_by(region) %>%
+  summarise(.groups = "drop") %>%
+  st_make_valid() %>%
+  st_transform(crs_robin)
+
+# polygons joined to the 2020-2025 assignment summary (for the pct + 2020-2025 N maps)
+region_sf <- region_poly %>% left_join(reg_assign, by = "region")
+
+# faint basemap = all land (incl. regions with no assignment data)
+basemap <- world %>% st_make_valid() %>% st_transform(crs_robin)
+
+# graticule: faint lat/long lines every 20 deg (built in lon/lat, projected to Robinson)
+graticule <- st_graticule(x = c(-180, -90, 180, 90), crs = st_crs(4326),
+                          lon = seq(-180, 180, 20),
+                          lat = seq(-80, 80, 20)) %>%
+  st_transform(crs_robin)
+
+# label point per region: a representative interior point (centred, guaranteed on land)
+region_labels <- region_sf %>%
+  filter(region %in% region_ord) %>%
+  st_point_on_surface() %>%
+  select(region)
+
+# manual label nudges (fractions of map width/height); their st_point_on_surface
+# interior points sit slightly off where the label reads best
+map_w_span <- diff(st_bbox(region_labels)[c("xmin", "xmax")])
+map_h_span <- diff(st_bbox(region_labels)[c("ymin", "ymax")])
+nudge_label <- function(region_name, dx_frac = 0, dy_frac = 0) {
+  i <- region_labels$region == region_name
+  region_labels$geometry[i] <<- region_labels$geometry[i] +
+    c(dx_frac * map_w_span, dy_frac * map_h_span)
+}
+# Antarctica: left so it clears the meridian, and down onto the continent
+nudge_label("Antarctica", dx_frac = -0.25, dy_frac = -0.04)
+# Caribbean: down a touch off the island cluster
+nudge_label("Caribbean", dy_frac = -0.03)
+region_labels <- st_set_crs(region_labels, crs_robin)
+
+# additional manual nudges specified in DEGREES (dx = lon, dy = lat): project the label to
+# lon/lat, add the degree offset, and project back to Robinson. Exact per-point, so a
+# "10 deg" shift means the same in geographic terms regardless of projection distortion.
+nudge_label_deg <- function(region_name, dx_deg = 0, dy_deg = 0) {
+  i     <- which(region_labels$region == region_name)
+  pt_ll <- st_transform(region_labels$geometry[i], 4326)
+  moved <- st_sfc(st_point(as.numeric(st_coordinates(pt_ll)) + c(dx_deg, dy_deg)), crs = 4326)
+  region_labels$geometry[i] <<- st_transform(moved, crs_robin)
+}
+nudge_label_deg("North America",   dx_deg = -4, dy_deg = 5)  # up 5, left 4
+nudge_label_deg("South America",   dx_deg = -6, dy_deg = 10) # up 10, left 6
+nudge_label_deg("Eastern Africa",  dx_deg = 10, dy_deg = 8)  # up 8, right 10
+nudge_label_deg("Western Asia",    dy_deg = 5)              # up 5
+nudge_label_deg("Southern Asia",   dx_deg = -3, dy_deg = 3)  # up 3, left 3
+nudge_label_deg("Northern Europe", dx_deg = -10, dy_deg = -2) # left 10, down 2
+nudge_label_deg("Eastern Europe",  dx_deg = 10, dy_deg = 3)  # up 3, right 10
+nudge_label_deg("Northern Africa", dx_deg = -5, dy_deg = 5)  # up 5, left 5
+nudge_label_deg("Antarctica",      dx_deg = 5)              # right 5
+region_labels <- st_set_crs(region_labels, crs_robin)
+
+# two-line variant of each label (break at the first space, e.g. "South-Eastern\nAsia") so
+# boxed labels centre over their region and neighbours (W/N Africa, W/S Asia, S/W Europe) separate
+region_labels <- region_labels %>% mutate(region_lab = sub(" ", "\n", region))
+
+# extra degree nudges for the boxed (two-line, repelled) labels only -- the plain-label maps
+# keep the positions above. Same lon/lat round-trip as nudge_label_deg(), but returns a copy.
+shift_label_deg <- function(lab, region_name, dx_deg = 0, dy_deg = 0) {
+  i     <- which(lab$region == region_name)
+  pt_ll <- st_transform(lab$geometry[i], 4326)
+  moved <- st_sfc(st_point(as.numeric(st_coordinates(pt_ll)) + c(dx_deg, dy_deg)), crs = 4326)
+  lab$geometry[i] <- st_transform(moved, crs_robin)
+  lab
+}
+region_labels_boxed <- region_labels %>%
+  shift_label_deg("North America",   dx_deg = -6, dy_deg = -5) %>%  # left 6, down 5
+  shift_label_deg("Central America", dy_deg = -2) %>%               # down 2
+  shift_label_deg("Eastern Europe",  dx_deg = -6, dy_deg = -4) %>%  # left 6, down 4
+  shift_label_deg("Eastern Asia",    dx_deg = -5) %>%               # left 5
+  shift_label_deg("Northern Africa", dy_deg = 2) %>%                # up 2
+  shift_label_deg("Western Asia",    dy_deg = -4) %>%               # down 4
+  shift_label_deg("Western Europe",  dx_deg = -3) %>%               # left 3
+  shift_label_deg("Northern Europe", dx_deg = -3) %>%               # left 3
+  shift_label_deg("Antarctica",      dx_deg = 15)                   # right 15
+```
+
+## Region -> country lookup table
+
+```{r region-country-lookup, message=FALSE}
+# concatenated country list per region, for reference (built from the raw source lookups)
+region_country_lookup <- f.lookup %>%
+  map_dfr(~read_csv(.x, col_types = cols(.default = "c"))) %>%
+  distinct(country, region) %>%
+  filter(!is.na(country), !is.na(region)) %>%
+  mutate(region = factor(region,
+                         levels = c(region_ord,
+                                    setdiff(sort(unique(region)), region_ord)))) %>%
+  arrange(region, country) %>%
+  group_by(region) %>%
+  summarise(n_countries = n(),
+            countries   = paste(country, collapse = ", "),
+            .groups = "drop")
+
+region_country_lookup
+write.csv(region_country_lookup, paste0(f.out, "region_country_lookup.csv"), row.names = FALSE)
+```
+
+## Map base + outputs
+
+```{r map-base}
+# shared base: grey basemap + region polygons (fill set per map) + centred labels.
+# `data` defaults to the 2020-2025 region_sf but can be swapped (e.g. N maps by date range).
+# `labels = FALSE` drops the region text (for clean, label-free versions of a map).
+# `alpha` sets the region-fill transparency (lower = more transparent for label contrast).
+# `label_style = "boxed"` draws larger, bold, two-line repelled labels on a faint, borderless white
+# backing box (fill = alpha("white", 0.45)); "plain" = original text.
+base_map <- function(fill_col, data = region_sf, labels = TRUE, alpha = 0.6,
+                     label_style = "plain") {
+  ggplot() +
+    geom_sf(data = graticule, color = "grey85", linewidth = 0.2) +
+    geom_sf(data = basemap,   fill = "grey95", color = "grey80", linewidth = 0.15) +
+    geom_sf(data = data, aes(fill = .data[[fill_col]]),
+            color = "white", linewidth = 0.3, alpha = alpha) +
+    {if (labels && label_style == "plain")
+      geom_sf_text(data = region_labels, aes(label = region), size = 3.2)} +
+    {if (labels && label_style == "boxed")
+      # repel (fixed seed) so the crowded Europe / N Africa-W Asia / Middle-E Africa boxes separate
+      geom_label_repel(data = region_labels_boxed, aes(label = region_lab, geometry = geometry),
+                       stat = "sf_coordinates", size = 3.2, fontface = "bold",
+                       lineheight = 0.8, fill = alpha("white", 0.45), linewidth = 0,
+                       label.padding = unit(0.1, "lines"), box.padding = unit(0.05, "lines"),
+                       point.size = NA, min.segment.length = Inf, max.overlaps = Inf,
+                       seed = 42)} +
+    # NB: no scale bar or north arrow -- both are cartographically meaningless on a
+    # whole-world Robinson projection (and ggspatial::annotation_scale() errors because the
+    # panel corner inverse-projects to NaN outside the projection lens).
+    coord_sf(datum = NA, expand = FALSE) +
+    theme_void() +
+    theme(text            = element_text(size = 13),
+          legend.position = "bottom",
+          legend.key.width = unit(1.4, "cm"),
+          legend.title     = element_text(hjust = 0.5, vjust = 0.5))
+}
+```
+
+### % assigned (GenoFlu / Genin2)
+
+```{r map-genoflu, fig.width=6, fig.height=3.5}
+scale_genoflu <- scale_fill_distiller(palette = "YlGnBu", direction = 1,
+                                      name = "% GenoFlu genotype\nassigned 2020-2025",
+                                      limits = c(0, 100), na.value = "grey90")
+
+p_map_genoflu <- base_map("pct_genoflu") + scale_genoflu
+p_map_genoflu
+ggsave(paste0(f.out, "map_pct_assigned_genoflu.pdf"), p_map_genoflu, width = map_w, height = map_h)
+ggsave(paste0(f.out, "map_pct_assigned_genoflu.png"), p_map_genoflu, width = map_w, height = map_h)
+
+# label-free version (same map, no region text; less transparent fill for stronger colour)
+p_map_genoflu_nolab <- base_map("pct_genoflu", labels = FALSE, alpha = 0.9) + scale_genoflu
+ggsave(paste0(f.out, "map_pct_assigned_genoflu_nolabels.pdf"), p_map_genoflu_nolab, width = map_w, height = map_h)
+ggsave(paste0(f.out, "map_pct_assigned_genoflu_nolabels.png"), p_map_genoflu_nolab, width = map_w, height = map_h)
+```
+
+```{r map-genin, fig.width=6, fig.height=3.5}
+scale_genin <- scale_fill_distiller(palette = "YlGnBu", direction = 1,
+                                    name = "% Genin2 genotype\nassigned 2020-2025",
+                                    limits = c(0, 100), na.value = "grey90")
+
+p_map_genin <- base_map("pct_genin") + scale_genin
+p_map_genin
+ggsave(paste0(f.out, "map_pct_assigned_genin.pdf"), p_map_genin, width = map_w, height = map_h)
+ggsave(paste0(f.out, "map_pct_assigned_genin.png"), p_map_genin, width = map_w, height = map_h)
+
+# label-free version (same map, no region text; less transparent fill for stronger colour)
+p_map_genin_nolab <- base_map("pct_genin", labels = FALSE, alpha = 0.9) + scale_genin
+ggsave(paste0(f.out, "map_pct_assigned_genin_nolabels.pdf"), p_map_genin_nolab, width = map_w, height = map_h)
+ggsave(paste0(f.out, "map_pct_assigned_genin_nolabels.png"), p_map_genin_nolab, width = map_w, height = map_h)
+```
+
+### N samples (by date range)
+
+```{r map-n, fig.width=6, fig.height=3.5}
+# region polygons joined to a per-region sample count over a year window.
+# ymin/ymax NULL = unbounded; with both NULL, every sample is counted.
+region_n_sf <- function(ymin = NULL, ymax = NULL) {
+  d <- samp
+  if (!is.null(ymin)) d <- filter(d, collection_year >= ymin)
+  if (!is.null(ymax)) d <- filter(d, collection_year <= ymax)
+  region_poly %>% left_join(count(d, region, name = "n"), by = "region")
+}
+
+# legend_pos = "bottom" (default, wide horizontal colourbar), "right" (vertical colourbar) or
+# "top" (horizontal colourbar above the map, title directly above the bar, left-justified).
+# Right-legend layout uses wider/shorter export dims since the key sits beside the map, not below.
+# range_lab = NULL gives a plain "N H5Nx samples" legend title (used for the all-dates maps).
+map_n <- function(ymin, ymax, range_lab, file_suffix,
+                  legend_pos = "bottom", w = map_w, h = map_h, alpha = 0.6,
+                  label_style = "plain") {
+  # top legend: title on one line above the bar ("N H5Nx samples, 1996-2025"; saves height);
+  # others keep the two-line title
+  leg_title <- if (is.null(range_lab)) "N H5Nx samples" else
+    paste0("N H5Nx samples", if (legend_pos == "top") ", " else "\n", range_lab)
+  p <- base_map("n", data = region_n_sf(ymin, ymax), alpha = alpha, label_style = label_style) +
+    scale_fill_distiller(palette = "YlGnBu", direction = 1, trans = "log10",
+                         name = leg_title, na.value = "grey90",
+                         breaks = c(10, 100, 1000, 10000))
+  if (legend_pos == "top") {
+    # legend above the map (panel E in 07_summarize*): minimises gaps in the composite
+    p <- p + guides(fill = guide_colourbar(direction = "horizontal")) +
+      theme(legend.position       = "top",
+            legend.justification  = "left",
+            legend.title.position = "top",
+            legend.title          = element_text(hjust = 0, face = "bold", size = 13.75,
+                                                 margin = margin(0, 0, 1, 0)),
+            legend.text           = element_text(size = 9),
+            legend.key.width      = unit(1.1, "cm"),  # colourbar length = 5x key width (~5.5 cm)
+            legend.key.height     = unit(0.35, "cm"),
+            legend.margin         = margin(0, 0, 0, 60),  # nudge legend right of the map edge
+            legend.box.spacing    = unit(2, "pt"))
+  }
+  if (legend_pos == "right") {
+    p <- p + guides(fill = guide_colourbar(direction = "vertical")) +
+      theme(legend.position  = "right",
+            legend.key.width  = unit(0.5, "cm"),
+            legend.key.height = unit(1.4, "cm"),
+            legend.title      = element_text(hjust = 0, face = "bold"),
+            plot.margin       = margin(r = 10))  # room for the bold legend title
+  }
+  ggsave(paste0(f.out, "map_n_samples_", file_suffix, ".pdf"), p, width = w, height = h)
+  ggsave(paste0(f.out, "map_n_samples_", file_suffix, ".png"), p, width = w, height = h)
+  p
+}
+
+p_map_n_2020 <- map_n(2020, NULL, "2020-2025",   "2020-2025")
+p_map_n_1996 <- map_n(1996, NULL, "1996-2025",   "1996-2025")
+p_map_n_all  <- map_n(NULL, NULL, NULL, "all-dates")
+
+# legend-on-the-right versions (own, wider/shorter export dims; less transparent fill -- these
+# are reused in another script, where the stronger colours read better). Boxed labels so the
+# region names stay legible at composite size (panel E in 07_summarize*).
+p_map_n_1996_right <- map_n(1996, NULL, "1996-2025", "1996-2025_legend-right",
+                            legend_pos = "right", w = 7.6, h = 3.6, alpha = 0.7,
+                            label_style = "boxed")
+p_map_n_all_right  <- map_n(NULL, NULL, NULL, "all-dates_legend-right",
+                            legend_pos = "right", w = 7.6, h = 3.6, alpha = 0.7,
+                            label_style = "boxed")
+p_map_n_2020
+
+# legend-on-top versions for the 07_summarize* composites (panel E): horizontal colourbar above
+# the map, title directly above it (left-justified), boxed labels as in the right versions.
+# Near-opaque fill (alpha 0.95): the faint label backing boxes keep the region names readable
+p_map_n_1996_top <- map_n(1996, NULL, "1996-2025", "1996-2025_legend-top",
+                          legend_pos = "top", w = 7.6, h = 4.3, alpha = 0.95,
+                          label_style = "boxed")
+p_map_n_all_top  <- map_n(NULL, NULL, NULL, "all-dates_legend-top",
+                          legend_pos = "top", w = 7.6, h = 4.3, alpha = 0.95,
+                          label_style = "boxed")
+p_map_n_1996
+p_map_n_all
+p_map_n_1996_right
+p_map_n_all_right
+p_map_n_1996_top
+p_map_n_all_top
+```
+
+### Genotype pies by region (2020-2025)
+
+```{r map-pies, fig.width=8.2, fig.height=4.1}
+# One pie per global region, centred on the region centroid (pushed down so the bumped-up
+# label clears it). Pie area is proportional to the number of samples ASSIGNED a genotype
+# by that method (sqrt scaling), with a small floor so sparse regions stay visible.
+# Slices are the top genotypes globally (2020-2025); rarer ones collapse into "Other".
+
+# map extent (full region polygons) drives pie sizing and legend placement
+bb_pie     <- st_bbox(region_poly)
+pie_w_span <- bb_pie["xmax"] - bb_pie["xmin"]
+pie_h_span <- bb_pie["ymax"] - bb_pie["ymin"]
+
+# region centroids in Robinson space (geographic centre; may sit offshore, fine as a marker)
+region_cent <- region_poly %>%
+  st_centroid() %>%
+  mutate(x = st_coordinates(.)[, 1], y = st_coordinates(.)[, 2]) %>%
+  st_drop_geometry() %>%
+  select(region, x, y)
+
+r_max   <- 0.052 * pie_w_span   # radius of the largest pie
+r_floor <- 0.013 * pie_w_span   # minimum radius so small regions remain legible
+
+# wide genotype-count table per region for one method, lumped to top `n_top` + "Other"
+pie_data <- function(method, n_top = 9) {
+  gcol <- paste0(method, "_geno")
+  acol <- paste0("assigned_", method)
+  a <- samp %>%
+    filter(collection_year >= 2020, .data[[acol]]) %>%
+    transmute(region, geno = .data[[gcol]])
+  ord  <- a %>% count(geno, sort = TRUE) %>% slice_head(n = n_top) %>% pull(geno)
+  cols <- c(ord, "Other")
+  wide <- a %>%
+    mutate(geno = if_else(geno %in% ord, geno, "Other")) %>%
+    count(region, geno) %>%
+    group_by(region) %>% mutate(n_assigned = sum(n)) %>% ungroup() %>%
+    pivot_wider(names_from = geno, values_from = n, values_fill = 0) %>%
+    left_join(region_cent, by = "region") %>%
+    filter(!is.na(x))
+  for (cc in setdiff(cols, names(wide))) wide[[cc]] <- 0   # ensure every slice column exists
+  wide$r <- pmax(r_floor, r_max * sqrt(wide$n_assigned / max(wide$n_assigned)))
+  list(df = as.data.frame(wide), cols = cols, max_n = max(wide$n_assigned))
+}
+
+# qualitative palette: distinct non-grey hues for the named genotypes, grey reserved for "Other".
+# (Set1's 9th colour is grey, which would clash with "Other", so use an explicit list instead.)
+geno_cols_base <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
+                    "#FFD92F", "#A65628", "#F781BF", "#1B9E77", "#66A61E",
+                    "#7570B3", "#E6AB02")
+pie_pal <- function(cols) {
+  k <- length(cols) - 1   # named genotypes; last entry is always "Other"
+  setNames(c(geno_cols_base[seq_len(k)], "grey70"), cols)
+}
+
+pie_map <- function(method, title, file_suffix) {
+  pd  <- pie_data(method)
+  # top-justify the pie (its top edge sits at the centroid) so every region shows the SAME
+  # gap between its label and the top of its pie, regardless of pie size.
+  pie_gap <- 0.035 * pie_h_span
+  pc  <- pd$df %>% mutate(y = y - r)                       # pie centre = centroid - radius
+  lab <- pd$df %>% transmute(region, x, y = y + pie_gap)   # label a fixed gap above the pie top
+  brkN <- c(100, 1000, 10000)
+  brkN <- brkN[brkN <= pd$max_n]
+  p <- ggplot() +
+    geom_sf(data = graticule,   color = "grey85", linewidth = 0.2) +
+    geom_sf(data = basemap,     fill = "grey95", color = "grey80", linewidth = 0.15) +
+    geom_sf(data = region_poly, fill = "grey88", color = "white",  linewidth = 0.25) +
+    geom_scatterpie(aes(x = x, y = y, group = region, r = r), data = pc,
+                    cols = pd$cols, color = "white", linewidth = 0.1) +
+    geom_text(data = lab, aes(x, y, label = region), size = 2.7, fontface = "bold") +
+    # pie-area size key, placed on the right (empty South Pacific) so it groups with the
+    # fill legend; smaller text than the genotype legend.
+    geom_scatterpie_legend(pc$r, x = bb_pie["xmin"] + 0.82 * pie_w_span,
+                           y = bb_pie["ymin"] + 0.30 * pie_h_span,
+                           breaks = r_max * sqrt(brkN / pd$max_n),
+                           labeller = function(r) round((r / r_max)^2 * pd$max_n), size = 2.3) +
+    scale_fill_manual(values = pie_pal(pd$cols), name = title) +
+    coord_sf(datum = NA, expand = FALSE) +
+    theme_void() +
+    theme(text             = element_text(size = 13),
+          legend.position  = "right",
+          legend.key.size  = unit(0.4, "cm"),
+          legend.text      = element_text(size = 7),
+          legend.title     = element_text(size = 8))
+  ggsave(paste0(f.out, "map_pies_", file_suffix, ".pdf"), p, width = 8.2, height = map_h)
+  ggsave(paste0(f.out, "map_pies_", file_suffix, ".png"), p, width = 8.2, height = map_h)
+  p
+}
+
+p_pie_genoflu <- pie_map("genoflu", "GenoFlu genotype\n(2020-2025)", "genoflu")
+p_pie_genin   <- pie_map("genin",   "Genin2 genotype\n(2020-2025)",  "genin")
+p_pie_genoflu
+p_pie_genin
+```
+
+### Region reference map
+
+```{r region-colours}
+# colour each region by a continent-family hue ramp (base-R hcl.colors, no extra deps)
+region_fam <- c(
+  "Western Europe" = "Europe", "Northern Europe" = "Europe",
+  "Southern Europe" = "Europe", "Eastern Europe" = "Europe",
+  "Western Africa" = "Africa", "Northern Africa" = "Africa", "Southern Africa" = "Africa",
+  "Eastern Africa" = "Africa", "Middle Africa" = "Africa",
+  "Western Asia" = "Asia", "Central Asia" = "Asia", "Southern Asia" = "Asia",
+  "South-Eastern Asia" = "Asia", "Eastern Asia" = "Asia",
+  "North America" = "Americas", "Central America" = "Americas",
+  "Caribbean" = "Americas", "South America" = "Americas",
+  "Oceania" = "Other", "Antarctica" = "Other"
+)
+fam_pal <- c(Europe = "Blues 3", Africa = "Oranges", Asia = "Greens 3",
+             Americas = "Purples 3", Other = "Teal")
+
+region_cols <- unlist(lapply(names(fam_pal), function(f) {
+  regs <- names(region_fam)[region_fam == f]
+  # use a saturated mid-band of the ramp; the raw light end is near-white (~#F9F9F9) and reads as grey
+  ramp <- colorRampPalette(hcl.colors(9, fam_pal[f])[2:7])
+  setNames(ramp(length(regs)), regs)
+}))
+```
+
+```{r map-region, fig.width=6, fig.height=3.5}
+p_map_region <- base_map("region") +
+  scale_fill_manual(values = region_cols, na.value = "grey90", guide = "none")
+p_map_region
+ggsave(paste0(f.out, "map_region_reference.pdf"), p_map_region, width = map_w, height = map_h)
+ggsave(paste0(f.out, "map_region_reference.png"), p_map_region, width = map_w, height = map_h)
+```
+
+## Write region table
+
+```{r write}
+write.csv(st_drop_geometry(region_sf), paste0(f.out, "region_pct_assigned_since2020.csv"),
+          row.names = FALSE)
+```
