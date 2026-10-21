@@ -1,0 +1,235 @@
+---
+title: "genin2 summary"
+author: "Angela"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Objectives
+* Merge all genin2 output TSVs and join to sample metadata
+* Assess genotype assignment completeness by region and time
+* Visualize primary genotypes across regions
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(gtools)
+
+plot.theme <- theme(
+  panel.grid.minor = element_blank(),
+  panel.background = element_rect("grey95"),
+  axis.line        = element_line(colour = "black"),
+  text             = element_text(size = 10, face = "bold"),
+  legend.text      = element_text(size = 8),
+  axis.text.x      = element_text(angle = 45, hjust = 1, vjust = 1)
+)
+```
+
+```{r paths}
+f.in     <- "../output_genin2/"
+f.met.in <- "../input_genin2/"
+
+f.out <- paste0(Sys.Date(), "_summary/")
+if (!dir.exists(f.out)) dir.create(f.out)
+```
+
+## Read and join genin2 outputs
+
+```{r read-genin, message=FALSE}
+gen.files <- list.files(f.in, pattern = "_output\\.tsv$", full.names = TRUE) %>% mixedsort()
+met.files <- list.files(f.met.in, pattern = "meta",        full.names = TRUE) %>% mixedsort()
+
+gen.all <- map_dfr(gen.files, ~read_tsv(.x, col_types = cols(.default = "c"))) %>%
+  rename(
+    sample        = `Sample Name`,
+    genin_geno    = Genotype,
+    genin_subgeno = `Sub-genotype`,
+    genin_PB2     = PB2,
+    genin_PB1     = PB1,
+    genin_PA      = PA,
+    genin_NP      = NP,
+    genin_NA      = `NA`,
+    genin_M       = MP,
+    genin_NS      = NS,
+    genin_notes   = Notes
+  )
+
+cat(nrow(gen.all), "total samples\n")
+cat(sum(gen.all$genin_geno == "[unassigned]"), "unassigned (",
+    round(mean(gen.all$genin_geno == "[unassigned]") * 100, 1), "%)\n")
+```
+
+## Read metadata and join
+
+```{r read-meta, message=FALSE}
+met.all <- map_dfr(met.files, ~read_csv(.x, col_types = cols(.default = "c"))) %>%
+  filter(segment == "HA") %>%
+  mutate(
+    collection_date = as.Date(collection_date),
+    collection_year = as.integer(collection_year)
+  )
+
+stopifnot(all(met.all$sample %in% gen.all$sample))
+
+met.gen <- met.all %>%
+  left_join(gen.all, by = "sample") %>%
+  mutate(assigned = !is.na(genin_geno) & genin_geno != "[unassigned]")
+
+region_ord <- c(
+  "Western Europe", "Northern Europe", "Southern Europe", "Eastern Europe",
+  "Western Africa", "Northern Africa", "Southern Africa",
+  "Western Asia", "Central Asia", "Southern Asia", "South-Eastern Asia", "Eastern Asia",
+  "North America", "Central America", "Caribbean", "South America",
+  "Oceania", "Antarctica"
+)
+```
+
+## Genotype frequency: all samples
+
+```{r freq-all, fig.width=7, fig.height=4}
+geno_ord <- count(gen.all, genin_geno, sort = TRUE) %>% pull(genin_geno)
+
+met.gen %>%
+  mutate(genin_geno = factor(genin_geno, levels = geno_ord)) %>%
+  ggplot(aes(x = genin_geno, fill = genin_geno)) +
+  geom_bar() +
+  theme_bw() + plot.theme +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = "Genin2 genotype", y = "Count", title = "All H5Nx samples")
+ggsave(paste0(f.out, "genin_genos_freq_all.png"), width = 7, height = 4)
+
+met.gen %>%
+  filter(assigned) %>%
+  mutate(genin_geno = factor(genin_geno, levels = geno_ord)) %>%
+  ggplot(aes(x = genin_geno, fill = genin_geno)) +
+  geom_bar() +
+  theme_bw() + plot.theme +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = "Genin2 genotype", y = "Count", title = "Assigned genotypes only")
+ggsave(paste0(f.out, "genin_genos_freq_assigned.png"), width = 7, height = 4)
+```
+
+## Assignment rate by region
+
+```{r assign-region, fig.width=7, fig.height=5}
+reg_summary <- met.gen %>%
+  filter(!is.na(region)) %>%
+  group_by(region) %>%
+  summarise(
+    n_total      = n(),
+    n_assigned   = sum(assigned, na.rm = TRUE),
+    pct_assigned = mean(assigned, na.rm = TRUE) * 100,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_assigned))
+
+reg_summary %>%
+  ggplot(aes(x = reorder(region, pct_assigned), y = pct_assigned, fill = pct_assigned)) +
+  geom_col() +
+  geom_text(aes(label = paste0(round(pct_assigned, 1), "%  (n=", n_total, ")")),
+            hjust = -0.05, size = 3) +
+  coord_flip() +
+  scale_fill_gradient(low = "#fee8c8", high = "#e34a33") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.4))) +
+  theme_bw() + plot.theme +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0.5)) +
+  labs(x = NULL, y = "% assigned genin2 genotype", title = "Genin2 genotype assignment rate by region")
+ggsave(paste0(f.out, "assign_rate_by_region.png"), width = 7, height = 5)
+
+reg_summary
+```
+
+## Assignment rate by region × year
+
+```{r assign-reg-year, fig.width=9, fig.height=6}
+reg_year <- met.gen %>%
+  filter(region %in% region_ord, collection_year >= 2015) %>%
+  group_by(region, collection_year) %>%
+  summarise(
+    n_total      = n(),
+    pct_assigned = mean(assigned, na.rm = TRUE) * 100,
+    .groups = "drop"
+  ) %>%
+  complete(region, collection_year, fill = list(n_total = 0, pct_assigned = NA)) %>%
+  mutate(region = factor(region, levels = rev(region_ord)))
+
+reg_year %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = n_total), size = 2.5) +
+  scale_fill_gradient(low = "#fee8c8", high = "#e34a33", name = "% assigned",
+                      limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2015, max(reg_year$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  labs(x = "Year", y = NULL,
+       title = "% genin2 genotype assignment")
+ggsave(paste0(f.out, "assign_rate_reg_year_heatmap.png"), width = 9, height = 6)
+
+
+reg_year %>%
+  filter(collection_year>2019)%>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = n_total), size = 2.5) +
+  scale_fill_gradient(low = "#fee8c8", high = "#e34a33", name = "% assigned",
+                      limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2015, max(reg_year$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  labs(x = "Year", y = NULL,
+       title = "% genin2 genotype assignment")
+ggsave(paste0(f.out, "assign_rate_reg_year_heatmap_since2020.png"), width = 5, height = 6)
+```
+
+## Top genotypes by region (assigned only)
+
+```{r top-genos-region, fig.width=10, fig.height=5}
+top_n <- 10
+
+top_genos <- met.gen %>%
+  filter(assigned) %>%
+  count(genin_geno, sort = TRUE) %>%
+  slice_head(n = top_n) %>%
+  pull(genin_geno)
+
+met.gen %>%
+  filter(assigned, genin_geno %in% top_genos, region %in% region_ord) %>%
+  mutate(genin_geno = factor(genin_geno, levels = top_genos),
+         region     = factor(region, levels = region_ord)) %>%
+  count(region, genin_geno) %>%
+  group_by(region) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ungroup() %>%
+  ggplot(aes(x = region, y = pct, fill = genin_geno)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Paired", name = "Genin2 genotype") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "% of assigned samples",
+       title = paste("Top", top_n, "genin2 genotypes by region"))
+ggsave(paste0(f.out, "top_genos_by_region.png"), width = 10, height = 5)
+```
+
+## Summary table: assignment by region and year
+
+```{r summary-table}
+met.gen.year<-met.gen %>%
+  filter(!is.na(region)) %>%
+  group_by(region, collection_year) %>%
+  summarise(
+    n            = n(),
+    pct_assigned = round(mean(assigned, na.rm = TRUE) * 100, 1),
+    top_genotype = if (any(assigned, na.rm = TRUE)) {
+      names(sort(table(genin_geno[assigned]), decreasing = TRUE))[1]
+    } else NA_character_,
+    .groups = "drop"
+  ) %>%
+  arrange(region, collection_year)
+```
+
+## Write joined data
+
+```{r write}
+write.csv(met.gen, paste0(f.out, "summarized_genin_meta.csv"), row.names = FALSE)
+write.csv(met.gen.year, paste0(f.out, "summarized_genin_meta_year.csv"), row.names = FALSE)
+```
