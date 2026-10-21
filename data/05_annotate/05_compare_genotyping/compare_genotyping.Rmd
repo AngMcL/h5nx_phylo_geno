@@ -1,0 +1,785 @@
+---
+title: "Genin2 vs GenoFlu: genotype assignment comparison"
+author: "Angela"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Objectives
+* Join genin2 and GenoFlu genotype outputs on shared samples
+* Compare assignment completeness by region and year for both systems
+* Identify which system assigns more completely in each region
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(gtools)
+library(cowplot)
+library(magick)
+```
+
+```{r}
+plot.theme <- theme(
+  panel.grid.minor = element_blank(),
+  panel.background = element_rect("grey95"),
+  axis.line        = element_line(colour = "black"),
+  text             = element_text(size = 10, face = "bold"),
+  legend.text      = element_text(size = 8),
+  axis.text.x      = element_text(angle = 45, hjust = 1, vjust = 1)
+)
+```
+
+```{r paths}
+# find most recent output from each upstream script.
+# NB: sort(), not gtools::mixedsort() — mixedsort() reads the dashes in "2026-06-25" as
+# minus signs (month -> -06), reversing the date order so tail(1) would grab the OLDEST
+# file. ISO dates sort chronologically under plain sort().
+f.genin   <- list.files("../04_genin2/summary_genin2",    pattern = "summarized_genin_meta\\.csv",
+                         recursive = TRUE, full.names = TRUE) %>% sort() %>% tail(1)
+f.genoflu <- list.files("../02_genoflu/summarize_genoflu", pattern = "summarized_genoflu_meta\\.csv",
+                         recursive = TRUE, full.names = TRUE) %>% sort() %>% tail(1)
+
+cat("genin2 input: ",   f.genin,   "\n")
+cat("genoflu input: ",  f.genoflu, "\n")
+
+f.out <- paste0(Sys.Date(), "_summary/")
+if (!dir.exists(f.out)) dir.create(f.out)
+```
+
+## Read and join
+
+```{r read-join, message=FALSE}
+genin <- read_csv(f.genin, col_types = cols(.default = "c")) %>%
+  mutate(assigned_genin  = assigned == "TRUE",
+         collection_year = as.integer(collection_year),
+         across(c(genin_PB2, genin_PB1, genin_PA, genin_NP, genin_NA, genin_M, genin_NS),
+                ~na_if(., "?"))) %>%
+  select(seq_new, sample, region, continent, country, host,
+         collection_date, collection_year,
+         subtype, clade, genin_geno, assigned_genin,
+         genin_PB2, genin_PB1, genin_PA, genin_NP, genin_NA, genin_M, genin_NS)
+
+# seq_new (format: accession|date|segment) is the reliable join key — identical across both
+# metadata sources regardless of how sample IDs were formatted for each tool's input.
+# GenoFlu names the M segment "MP"; mapped to M here to match genin.
+genoflu <- read_csv(f.genoflu, col_types = cols(.default = "c")) %>%
+  rename(geno_list = `Genotype List Used, >=98.0%`) %>%
+  mutate(
+    assigned_genoflu = assigned == "TRUE",
+    collection_year  = as.integer(collection_year),
+    genoflu_PB2 = str_trim(str_match(geno_list, "\\bPB2:([^,]+)")[, 2]),
+    genoflu_PB1 = str_trim(str_match(geno_list, "\\bPB1:([^,]+)")[, 2]),
+    genoflu_PA  = str_trim(str_match(geno_list, "\\bPA:([^,]+)")[,  2]),
+    genoflu_HA  = str_trim(str_match(geno_list, "\\bHA:([^,]+)")[,  2]),
+    genoflu_NP  = str_trim(str_match(geno_list, "\\bNP:([^,]+)")[,  2]),
+    genoflu_NA  = str_trim(str_match(geno_list, "\\bNA:([^,]+)")[,  2]),
+    genoflu_M   = str_trim(str_match(geno_list, "\\bMP:([^,]+)")[,  2]),
+    genoflu_NS  = str_trim(str_match(geno_list, "\\bNS:([^,]+)")[,  2])
+  ) %>%
+  select(seq_new, genoflu_geno, assigned_genoflu,
+         genoflu_PB2, genoflu_PB1, genoflu_PA, genoflu_HA,
+         genoflu_NP, genoflu_NA, genoflu_M, genoflu_NS)
+
+combined <- genin %>%
+  full_join(genoflu, by = "seq_new") %>%
+  mutate(
+    assigned_genin   = replace_na(assigned_genin,   FALSE),
+    assigned_genoflu = replace_na(assigned_genoflu, FALSE),
+    collection_date  = as.Date(collection_date),
+    assignment_cat   = case_when(
+       assigned_genin &  assigned_genoflu ~ "Both",
+       assigned_genin & !assigned_genoflu ~ "Genin2 only",
+      !assigned_genin &  assigned_genoflu ~ "GenoFlu only",
+      TRUE                               ~ "Neither"
+    )
+  )
+
+cat(nrow(combined), "total samples after join\n")
+cat("Assignment breakdown:\n")
+print(table(combined$assignment_cat))
+```
+
+```{r region-setup}
+region_ord <- c(
+  "Western Europe", "Northern Europe", "Southern Europe", "Eastern Europe",
+  "Western Africa", "Northern Africa", "Southern Africa", "Eastern Africa", "Middle Africa",
+  "Western Asia", "Central Asia", "Southern Asia", "South-Eastern Asia", "Eastern Asia",
+  "North America", "Central America", "Caribbean", "South America",
+  "Oceania", "Antarctica"
+)
+
+# filter on collection_year, not collection_date: every sample has at least a year, but
+# collection_date is NA for partial dates (year-only / year-month), so a date filter
+# silently drops those 2020+ partial-date records. This also matches the segment heatmaps,
+# which already group/filter on collection_year.
+combined_2020 <- combined %>% filter(collection_year >= 2020)
+cat(nrow(combined_2020), "samples from 2020 onwards\n")
+
+# region order for the since-2020 plots: Eastern/Middle Africa have only pre-2020 data,
+# so they would appear as all-grey (no-data) rows -- drop them from these axes
+region_ord_2020 <- setdiff(region_ord, c("Eastern Africa", "Middle Africa"))
+```
+
+## Assignment categories by region
+
+```{r cat-by-region, fig.width=10, fig.height=5}
+cat_ord <- c("Both", "Genin2 only", "GenoFlu only", "Neither")
+cat_cols <- c("Both" = "#2166ac", "Genin2 only" = "#92c5de",
+              "GenoFlu only" = "#f4a582", "Neither" = "grey80")
+
+combined %>%
+  filter(region %in% region_ord) %>%
+  mutate(region       = factor(region, levels = region_ord),
+         assignment_cat = factor(assignment_cat, levels = cat_ord)) %>%
+  count(region, assignment_cat) %>%
+  group_by(region) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ungroup() %>%
+  ggplot(aes(x = region, y = pct, fill = assignment_cat)) +
+  geom_col() +
+  scale_fill_manual(values = cat_cols, name = "Assignment") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "% of samples")
+ggsave(paste0(f.out, "assignment_cat_by_region.png"), width = 10, height = 5)
+```
+
+### Since 2020 (%)
+
+```{r cat-by-region-2020, fig.width=10, fig.height=5}
+combined_2020 %>%
+  filter(region %in% region_ord) %>%
+  mutate(region         = factor(region, levels = region_ord),
+         assignment_cat = factor(assignment_cat, levels = cat_ord)) %>%
+  count(region, assignment_cat) %>%
+  group_by(region) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ungroup() %>%
+  ggplot(aes(x = region, y = pct, fill = assignment_cat)) +
+  geom_col() +
+  scale_fill_manual(values = cat_cols, name = "Assignment") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "% of samples")
+ggsave(paste0(f.out, "assignment_cat_by_region_since2020.png"), width = 10, height = 5)
+```
+
+### N assigned overall
+
+```{r cat-by-region-n, fig.width=10, fig.height=5}
+combined %>%
+  filter(region %in% region_ord) %>%
+  mutate(region         = factor(region, levels = region_ord),
+         assignment_cat = factor(assignment_cat, levels = cat_ord)) %>%
+  count(region, assignment_cat) %>%
+  ggplot(aes(x = region, y = n, fill = assignment_cat)) +
+  geom_col() +
+  scale_fill_manual(values = cat_cols, name = "Assignment") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "N samples")
+ggsave(paste0(f.out, "assignment_cat_by_region_n.png"), width = 10, height = 5)
+```
+
+### N assigned since 2020
+
+```{r cat-by-region-n-2020, fig.width=10, fig.height=5}
+combined_2020 %>%
+  filter(region %in% region_ord) %>%
+  mutate(region         = factor(region, levels = region_ord),
+         assignment_cat = factor(assignment_cat, levels = cat_ord)) %>%
+  count(region, assignment_cat) %>%
+  ggplot(aes(x = region, y = n, fill = assignment_cat)) +
+  geom_col() +
+  scale_fill_manual(values = cat_cols, name = "Assignment") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "N samples")
+ggsave(paste0(f.out, "assignment_cat_by_region_n_since2020.png"), width = 10, height = 5)
+```
+
+## Assignment rate comparison by region
+
+```{r compare-region, fig.width=8, fig.height=5}
+reg_compare <- combined %>%
+  filter(region %in% region_ord) %>%
+  group_by(region) %>%
+  summarise(
+    n                = n(),
+    n_genin          = sum(assigned_genin),
+    n_genoflu        = sum(assigned_genoflu),
+    pct_genin        = mean(assigned_genin)   * 100,
+    pct_genoflu      = mean(assigned_genoflu) * 100,
+    pct_either       = mean(assigned_genin | assigned_genoflu) * 100,
+    .groups = "drop"
+  )
+
+reg_compare_2020 <- combined_2020 %>%
+  filter(region %in% region_ord) %>%
+  group_by(region) %>%
+  summarise(
+    n                = n(),
+    n_genin          = sum(assigned_genin),
+    n_genoflu        = sum(assigned_genoflu),
+    pct_genin        = mean(assigned_genin)   * 100,
+    pct_genoflu      = mean(assigned_genoflu) * 100,
+    pct_either       = mean(assigned_genin | assigned_genoflu) * 100,
+    .groups = "drop"
+  )
+
+sys_cols <- c("Genin2" = "#2166ac", "GenoFlu" = "#f4a582")
+
+reg_compare %>%
+  pivot_longer(cols = c(pct_genin, pct_genoflu),
+               names_to = "system", values_to = "pct_assigned") %>%
+  mutate(system = recode(system, pct_genin = "Genin2", pct_genoflu = "GenoFlu"),
+         system = factor(system, levels = c("GenoFlu", "Genin2")),
+         region = factor(region, levels = region_ord)) %>%
+  ggplot(aes(x = region, y = pct_assigned, fill = system)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = sys_cols, name = "Genotype method") +
+  theme_bw() + plot.theme +
+  theme(legend.position    = c(0.321, 0.99),
+        legend.justification = c(0.5, 1),
+        legend.text = element_text(size=rel(0.9))) +
+  labs(x = NULL, y = "% assigned genotype")
+ggsave(paste0(f.out, "assign_rate_comparison_by_region.png"), width = 6, height = 4)
+
+reg_compare %>% arrange(desc(pct_either))
+```
+
+### Since 2020 (%)
+
+```{r compare-region-2020, fig.width=8, fig.height=5}
+p_assign_rate_2020 <- reg_compare_2020 %>%
+  pivot_longer(cols = c(pct_genin, pct_genoflu),
+               names_to = "system", values_to = "pct_assigned") %>%
+  mutate(system = recode(system, pct_genin = "Genin2", pct_genoflu = "GenoFlu"),
+         system = factor(system, levels = c("GenoFlu", "Genin2")),
+         region = factor(region, levels = region_ord)) %>%
+  ggplot(aes(x = region, y = pct_assigned, fill = system)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = sys_cols, name = "Genotype method") +
+  theme_bw() + plot.theme +
+  theme(legend.position     = c(0.58, 0.99),
+        legend.justification = c(0.5, 1),
+        legend.text=element_text(size=rel(0.8)),
+        legend.title = element_text(size=rel(0.8))) +
+  labs(x = NULL, y = "% assigned genotype")
+p_assign_rate_2020
+ggsave(paste0(f.out, "assign_rate_comparison_by_region_since2020.png"), p_assign_rate_2020, width = 6, height = 4)
+```
+
+### N assigned overall
+
+```{r compare-region-n, fig.width=8, fig.height=5}
+reg_compare %>%
+  pivot_longer(cols = c(n_genin, n_genoflu),
+               names_to = "system", values_to = "n_assigned") %>%
+  mutate(system = recode(system, n_genin = "Genin2", n_genoflu = "GenoFlu"),
+         system = factor(system, levels = c("GenoFlu", "Genin2")),
+         region = factor(region, levels = region_ord)) %>%
+  ggplot(aes(x = region, y = n_assigned, fill = system)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = sys_cols, name = "Genotype method") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "N samples assigned")
+ggsave(paste0(f.out, "assign_n_comparison_by_region.png"), width = 8, height = 5)
+```
+
+### N assigned since 2020
+
+```{r compare-region-n-2020, fig.width=8, fig.height=5}
+reg_compare_2020 %>%
+  pivot_longer(cols = c(n_genin, n_genoflu),
+               names_to = "system", values_to = "n_assigned") %>%
+  mutate(system = recode(system, n_genin = "Genin2", n_genoflu = "GenoFlu"),
+         system = factor(system, levels = c("GenoFlu", "Genin2")),
+         region = factor(region, levels = region_ord)) %>%
+  ggplot(aes(x = region, y = n_assigned, fill = system)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = sys_cols, name = "Genotype method") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "N samples assigned")
+ggsave(paste0(f.out, "assign_n_comparison_by_region_since2020.png"), width = 8, height = 5)
+```
+
+## Assignment rate heatmap: both systems × region × year
+
+```{r heatmap-both, fig.width=10, fig.height=7}
+reg_year <- combined %>%
+  filter(region %in% region_ord, collection_year >= 2015) %>%
+  group_by(region, collection_year) %>%
+  summarise(
+    n            = n(),
+    pct_genin    = mean(assigned_genin)   * 100,
+    pct_genoflu  = mean(assigned_genoflu) * 100,
+    .groups = "drop"
+  ) %>%
+  complete(region = region_ord, collection_year, fill = list(n = 0, pct_genin = NA, pct_genoflu = NA)) %>%
+  pivot_longer(cols = c(pct_genin, pct_genoflu),
+               names_to = "system", values_to = "pct_assigned") %>%
+  mutate(system = recode(system, pct_genin = "Genin2", pct_genoflu = "GenoFlu"),
+         region = factor(region, levels = rev(region_ord)))
+
+reg_year %>%
+  mutate(text_col = if_else(!is.na(pct_assigned) & pct_assigned > 60, "white", "black")) %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  geom_text(aes(label = ifelse(n > 0, n, ""), color = text_col), size = 2) +
+  scale_color_identity() +
+  facet_wrap(~system, ncol = 2) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, name = "% genotype assigned",
+                       limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2015, max(reg_year$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  labs(x = "Year", y = NULL)
+ggsave(paste0(f.out, "assign_rate_heatmap_both_systems.png"), width = 12, height = 7)
+```
+
+### Since 2020
+```{r heatmap-both-2020, fig.width=6, fig.height=10}
+reg_year_2020 <- combined_2020 %>%
+  filter(region %in% region_ord) %>%
+  group_by(region, collection_year) %>%
+  summarise(
+    n            = n(),
+    pct_genin    = mean(assigned_genin)   * 100,
+    pct_genoflu  = mean(assigned_genoflu) * 100,
+    .groups = "drop"
+  ) %>%
+  complete(region = region_ord_2020, collection_year, fill = list(n = 0, pct_genin = NA, pct_genoflu = NA)) %>%
+  pivot_longer(cols = c(pct_genin, pct_genoflu),
+               names_to = "system", values_to = "pct_assigned") %>%
+  mutate(system = recode(system, pct_genin = "Genin2", pct_genoflu = "GenoFlu"),
+         region = factor(region, levels = rev(region_ord_2020)))
+
+reg_year_2020$system<-factor(reg_year_2020$system, levels=c("GenoFlu","Genin2"))
+
+reg_year_2020 %>%
+  mutate(text_col = if_else(!is.na(pct_assigned) & pct_assigned > 60, "white", "black")) %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  geom_text(aes(label = ifelse(n > 0, n, ""), color = text_col), size = 3) +
+  scale_color_identity() +
+  facet_wrap(~system, ncol = 1) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1,
+                       name = "% assigned",
+                       limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2020, max(reg_year_2020$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = NULL)+
+  theme(text=element_text(size=13))
+ggsave(paste0(f.out, "assign_rate_heatmap_both_systems_since2020.png"), width = 5, height = 9)
+
+#and horiz version — stored as p_geno_heatmap for publication panel
+p_geno_heatmap <- reg_year_2020 %>%
+  mutate(text_col = if_else(!is.na(pct_assigned) & pct_assigned > 60, "white", "black")) %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  geom_text(aes(label = ifelse(n > 0, n, ""), color = text_col), size = 3) +
+  scale_color_identity() +
+  facet_wrap(~system, ncol = 2) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1,
+                       name = "% assigned",
+                       limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2020, max(reg_year_2020$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = NULL)+
+  theme(text            = element_text(size = 13),
+        strip.text      = element_text(size = 14),
+        axis.text       = element_text(size = 12),
+        legend.text     = element_text(size = 12),
+        legend.position = "bottom")
+p_geno_heatmap
+ggsave(paste0(f.out, "assign_rate_heatmap_both_systems_since2020_horiz.png"), p_geno_heatmap, width = 8, height = 5)
+```
+
+## Which system assigns more per region?
+
+```{r winner-region, fig.width=7, fig.height=5}
+reg_compare %>%
+  mutate(
+    region  = factor(region, levels = region_ord),
+    diff    = pct_genin - pct_genoflu,
+    winner  = case_when(diff > 2  ~ "Genin2 better",
+                        diff < -2 ~ "GenoFlu better",
+                        TRUE      ~ "Similar")
+  ) %>%
+  ggplot(aes(x = pct_genoflu, y = pct_genin, colour = winner, label = region)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_point(size = 3) +
+  ggrepel::geom_text_repel(size = 3, max.overlaps = 20) +
+  scale_colour_manual(values = c("Genin2 better" = "#2166ac",
+                                  "GenoFlu better" = "#d6604d",
+                                  "Similar" = "grey40"),
+                      name = NULL) +
+  theme_bw() + plot.theme +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+  labs(x = "% assigned by GenoFlu", y = "% assigned by Genin2",
+       caption = "Dashed line = equal performance")
+ggsave(paste0(f.out, "assign_scatter_genin_vs_genoflu.png"), width = 7, height = 5)
+```
+
+## Segment-level cluster assignment rates: Genin2 vs GenoFlu
+
+Both methods assign segment-specific clusters: Genin2 via `genin_<seg>` columns; GenoFlu via
+`Genotype List Used, >=98.0%` parsed into matching `genoflu_<seg>` columns (GenoFlu's `MP` mapped to `M`).
+
+```{r seg-setup}
+segs         <- c("PB2", "PB1", "PA", "HA", "NP", "NA", "M", "NS")
+genin_cols   <- paste0("genin_",   segs)
+genoflu_cols <- paste0("genoflu_", segs)
+
+seg_long <- combined %>%
+  filter(region %in% region_ord) %>%
+  mutate(genin_HA = NA_character_) %>%  # Genin2 does not assign HA clusters
+  select(sample, region, collection_year, all_of(c(genin_cols, genoflu_cols))) %>%
+  pivot_longer(cols = all_of(c(genin_cols, genoflu_cols)),
+               names_to = "col", values_to = "cluster") %>%
+  mutate(
+    method   = if_else(str_starts(col, "genin_"), "Genin2", "GenoFlu"),
+    segment  = factor(str_remove(col, "genin_|genoflu_"), levels = segs),
+    assigned = !is.na(cluster),
+    region   = factor(region, levels = region_ord)
+  ) %>%
+  select(-col)
+```
+
+```{r seg-assign-region, fig.width=14, fig.height=6}
+seg_long %>%
+  group_by(region, segment, method) %>%
+  summarise(pct_assigned = mean(assigned) * 100, .groups = "drop") %>%
+  ggplot(aes(x = region, y = pct_assigned, fill = method)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~segment, nrow = 2, ncol = 4) +
+  scale_fill_manual(values = sys_cols, name = "Genotype method") +
+  theme_bw() + plot.theme +
+  labs(x = NULL, y = "% samples with cluster assigned")
+ggsave(paste0(f.out, "seg_cluster_assign_rate_by_region.png"), width = 14, height = 6)
+```
+
+```{r seg-heatmap, fig.width=16, fig.height=8}
+seg_long %>%
+  filter(collection_year >= 2015) %>%
+  group_by(region, collection_year, segment, method) %>%
+  summarise(n = n(), pct_assigned = mean(assigned) * 100, .groups = "drop") %>%
+  complete(region = region_ord, collection_year, segment = segs, method,
+           fill = list(n = 0, pct_assigned = NA)) %>%
+  mutate(region    = factor(region, levels = rev(region_ord)),
+         segment   = factor(segment, levels = segs),
+         method    = factor(method, levels = c("Genin2", "GenoFlu")),
+         text_col  = if_else(!is.na(pct_assigned) & pct_assigned > 60, "white", "black")) %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.3) +
+  geom_text(aes(label = ifelse(n > 0, n, ""), color = text_col), size = 1.5) +
+  scale_color_identity() +
+  facet_grid(method ~ segment) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, name = "% assigned",
+                       limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2015, max(combined$collection_year, na.rm = TRUE), 2)) +
+  theme_bw() + plot.theme +
+  labs(x = "Year", y = NULL)
+ggsave(paste0(f.out, "seg_cluster_assign_heatmap_by_region.png"), width = 16, height = 8)
+```
+
+### Since 2020
+
+```{r seg-heatmap-2020, fig.width=14, fig.height=8}
+p_seg_heatmap <- seg_long %>%
+  filter(collection_year >= 2020) %>%
+  group_by(region, collection_year, segment, method) %>%
+  summarise(n = n(), pct_assigned = mean(assigned) * 100, .groups = "drop") %>%
+  complete(region = region_ord_2020, collection_year, segment = segs, method,
+           fill = list(n = 0, pct_assigned = NA)) %>%
+  mutate(region   = factor(region, levels = rev(region_ord_2020)),
+         segment  = factor(segment, levels = segs),
+         method   = factor(method, levels = c("GenoFlu", "Genin2")),
+         text_col = if_else(!is.na(pct_assigned) & pct_assigned > 60, "white", "black")) %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.3) +
+  geom_text(aes(label = ifelse(n > 0, n, ""), color = text_col), size = 1.5) +
+  scale_color_identity() +
+  facet_grid(method ~ segment, switch = "y") +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, name = "% assigned",
+                       limits = c(0, 100), na.value = "grey90") +
+  scale_x_continuous(breaks = seq(2020, max(combined$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  theme(text        = element_text(size = 13),
+        strip.text  = element_text(size = 14),
+        axis.text   = element_text(size = 12),
+        legend.text = element_text(size = 12)) +
+  labs(x = NULL, y = NULL)
+p_seg_heatmap
+ggsave(paste0(f.out, "seg_cluster_assign_heatmap_by_region_since2020.png"), p_seg_heatmap, width = 14, height = 8)
+```
+
+## Genotype + segment cluster combined heatmap
+
+Genotype assignment is added as a pseudo-segment column so genotype and cluster rates can be
+compared in a single faceted plot.
+
+```{r seg-plusgeno-heatmap-2020, fig.width=16, fig.height=8}
+seg_plusord <- c("Genotype", segs)
+
+geno_long <- combined %>%
+  filter(region %in% region_ord) %>%
+  select(sample, region, collection_year,
+         assigned_genin, assigned_genoflu, genin_geno, genoflu_geno) %>%
+  pivot_longer(
+    cols      = c(assigned_genin, assigned_genoflu),
+    names_to  = "method_raw",
+    values_to = "assigned"
+  ) %>%
+  mutate(
+    method  = if_else(method_raw == "assigned_genin", "Genin2", "GenoFlu"),
+    segment = "Genotype",
+    cluster = if_else(method_raw == "assigned_genin", genin_geno, genoflu_geno)
+  ) %>%
+  select(sample, region, collection_year, method, segment, cluster, assigned)
+
+seg_plusgeno_long <- bind_rows(geno_long, seg_long) %>%
+  mutate(segment = factor(segment, levels = seg_plusord),
+         region  = factor(region,  levels = region_ord))
+
+p_seg_plusgeno_heatmap <- seg_plusgeno_long %>%
+  filter(collection_year >= 2020) %>%
+  group_by(region, collection_year, segment, method) %>%
+  summarise(n = n(), pct_assigned = mean(assigned) * 100, .groups = "drop") %>%
+  complete(region = region_ord_2020, collection_year, segment = seg_plusord, method,
+           fill = list(n = 0, pct_assigned = NA)) %>%
+  # Genin2 does not assign HA clusters by design — grey these cells out (NA -> na.value)
+  # and blank their counts rather than showing them as 0%
+  mutate(n            = if_else(method == "Genin2" & segment == "HA", 0L, n),
+         pct_assigned = if_else(method == "Genin2" & segment == "HA", NA_real_, pct_assigned)) %>%
+  mutate(region   = factor(region,  levels = rev(region_ord_2020)),
+         segment  = factor(segment, levels = seg_plusord),
+         method   = factor(method,  levels = c("GenoFlu", "Genin2")),
+         text_col = if_else(!is.na(pct_assigned) & pct_assigned > 60, "white", "black")) %>%
+  ggplot(aes(x = collection_year, y = region, fill = pct_assigned)) +
+  geom_tile(color = "white", linewidth = 0.3) +
+  # geom_text(aes(label = ifelse(n > 0, n, ""), color = text_col), size = 1.5) + # text too crowded
+  scale_color_identity() +
+  facet_grid(method ~ segment, switch = "y") +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, name = "% assigned",
+                       limits = c(0, 100), na.value = "grey90",
+                       guide = guide_colorbar(title.position = "top", 
+                                              title.hjust = 0.5,
+                                              title.vjust = 1)) +
+  scale_x_continuous(breaks = seq(2020, max(combined$collection_year, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  theme(text         = element_text(size = 13, ),
+        strip.text   = element_text(size = 14),
+        axis.text    = element_text(size = 12,face = "plain"),
+        legend.text  = element_text(size = 12, face = "plain",hjust=0.5),
+        legend.title = element_text(face = "plain"), size=14,hjust=0.5) +
+  labs(x = NULL, y = NULL)
+p_seg_plusgeno_heatmap
+ggsave(paste0(f.out, "seg_plusgeno_assign_heatmap_by_region_since2020.png"),
+       p_seg_plusgeno_heatmap, width = 16, height = 8)
+```
+
+## Predominant genotype frequencies
+
+```{r geno-freq-setup}
+min_n <- 100  # minimum total assigned samples to show a genotype
+
+top_genin <- combined %>%
+  filter(assigned_genin) %>%
+  count(genotype = genin_geno, sort = TRUE) %>%
+  filter(n >= min_n)
+
+top_genoflu <- combined %>%
+  filter(assigned_genoflu) %>%
+  count(genotype = genoflu_geno, sort = TRUE) %>%
+  filter(n >= min_n)
+
+cat("Genin2 genotypes with N >=", min_n, ":", nrow(top_genin), "\n")
+cat("GenoFlu genotypes with N >=", min_n, ":", nrow(top_genoflu), "\n")
+```
+
+### Overall frequency
+
+```{r geno-freq-plot, fig.width=6, fig.height=10}
+p_geno_freq <- bind_rows(
+  top_genin   %>% mutate(method = "Genin2"),
+  top_genoflu %>% mutate(method = "GenoFlu")
+) %>%
+  mutate(method = factor(method, levels = c("GenoFlu", "Genin2"))) %>%
+  arrange(method, n) %>%
+  mutate(genotype = factor(genotype, levels = unique(genotype))) %>%
+  ggplot(aes(x = n, y = genotype, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, scales = "free_y", ncol = 1) +
+  scale_fill_manual(values = c("GenoFlu" = "#f4a582", "Genin2" = "#2166ac")) +
+  theme_bw() + plot.theme +
+  theme(text        = element_text(size = 13),
+        strip.text  = element_text(size = 14),
+        axis.text.x = element_text(angle = 0, hjust = 0.5),
+        legend.text = element_text(size = 12)) +
+  labs(x = "N samples", y = NULL)
+p_geno_freq
+ggsave(paste0(f.out, "geno_freq_overall.png"), p_geno_freq, width = 6, height = 10)
+```
+
+### Frequency over time (2020–2025)
+
+```{r geno-time-plot, fig.width=10, fig.height=8}
+# separate qualitative palettes per method so legend colours visually cluster by method
+geno_cols_gf <- setNames(
+  colorRampPalette(c("#1f78b4", "#a6cee3", "#33a02c", "#b2df8a",
+                     "#e31a1c", "#fb9a99", "#ff7f00", "#fdbf6f",
+                     "#6a3d9a", "#cab2d6", "#b15928", "#ffff99"))(nrow(top_genoflu)),
+  top_genoflu$genotype
+)
+geno_cols_gi <- setNames(
+  colorRampPalette(c("#e6550d", "#fdae6b", "#31a354", "#a1d99b",
+                     "#3182bd", "#9ecae1", "#756bb1", "#bcbddc",
+                     "#636363", "#bdbdbd", "#d94701", "#fd8d3c"))(nrow(top_genin)),
+  top_genin$genotype
+)
+
+geno_time_data <- bind_rows(
+  combined %>%
+    filter(assigned_genoflu, genoflu_geno %in% top_genoflu$genotype) %>%
+    mutate(yr = collection_year) %>%
+    filter(!is.na(yr), yr >= 2020) %>%
+    count(genotype = genoflu_geno, yr) %>%
+    mutate(method = "GenoFlu"),
+  combined %>%
+    filter(assigned_genin, genin_geno %in% top_genin$genotype) %>%
+    mutate(yr = collection_year) %>%
+    filter(!is.na(yr), yr >= 2020) %>%
+    count(genotype = genin_geno, yr) %>%
+    mutate(method = "Genin2")
+) %>%
+  mutate(
+    method   = factor(method, levels = c("GenoFlu", "Genin2")),
+    genotype = factor(genotype, levels = c(top_genoflu$genotype, top_genin$genotype))
+  )
+
+p_geno_time <- geno_time_data %>%
+  ggplot(aes(x = yr, y = n, color = genotype, group = genotype)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  scale_y_log10() +
+  scale_color_manual(values = c(geno_cols_gf, geno_cols_gi), name = "Genotype") +
+  scale_x_continuous(breaks = seq(2020, max(geno_time_data$yr, na.rm = TRUE), 1)) +
+  theme_bw() + plot.theme +
+  theme(text        = element_text(size = 13),
+        strip.text  = element_text(size = 14),
+        legend.text = element_text(size = 12)) +
+  labs(x = NULL, y = "N samples (log scale)")
+p_geno_time
+ggsave(paste0(f.out, "geno_freq_over_time.png"), p_geno_time, width = 10, height = 8)
+```
+
+## Composite publication figure
+
+Row 1 (A): segment + genotype cluster assignment heatmap since 2020.
+Row 2: B) assignment rate comparison by region since 2020; C) overall genotype frequency.
+
+```{r composite-panel, fig.width=16, fig.height=16}
+row2 <- plot_grid(
+  p_assign_rate_2020, p_geno_freq,
+  nrow       = 1,
+  labels     = c("B", "C"),
+  label_size = 14,
+  align      = "h",
+  axis       = "b"
+)
+
+composite_fig <- plot_grid(
+  p_seg_plusgeno_heatmap, row2,
+  nrow        = 2,
+  labels      = c("A", ""),
+  label_size  = 14,
+  rel_heights = c(1, 1)
+)
+composite_fig
+ggsave(paste0(f.out, "composite_figure.pdf"), composite_fig, width = 16, height = 16)
+```
+
+### Map version (B, C = % assigned choropleths)
+
+Alternate composite: panel A stays the segment+genotype heatmap, but B and C are the
+`% assigned` world maps produced by `map_global_geno.Rmd` (read from its newest `_map/`
+folder). The PDFs are rasterized with `magick::image_read_pdf()` (needs ghostscript) and
+drawn back in with `cowplot::draw_image()`.
+
+```{r composite-panel-maps, fig.width=16, fig.height=16}
+library(pdftools)
+# newest map folder via sort()|>tail(1), same ISO-date rule as the data inputs (NOT mixedsort)
+f.map <- list.dirs(".", recursive = FALSE, full.names = TRUE) %>%
+  str_subset("_map$") %>% sort() %>% tail(1)
+cat("map input folder:", f.map, "\n")
+
+# read the two % assigned map PDFs and wrap each as a ggdraw object for plot_grid
+map_genoflu <- ggdraw() +
+  draw_image(image_read_pdf(file.path(f.map, "map_pct_assigned_genoflu_nolabels.pdf"), density = 300))
+map_genin <- ggdraw() +
+  draw_image(image_read_pdf(file.path(f.map, "map_pct_assigned_genin_nolabels.pdf"), density = 300))
+
+row2_maps <- plot_grid(
+  map_genoflu, map_genin,
+  nrow       = 1,
+  labels     = c("B", "C"),
+  label_size = 14
+)
+
+composite_fig_maps <- plot_grid(
+  p_seg_plusgeno_heatmap, row2_maps,
+  nrow        = 2,
+  labels      = c("A", ""),
+  label_size  = 14,
+  rel_heights = c(1, 0.7)
+)
+composite_fig_maps
+ggsave(paste0(f.out, "composite_figure_maps.pdf"), composite_fig_maps, width = 15, height = 11)
+```
+
+## Assignment % for North America and Europe, by period
+
+```{r pct-assigned-na-eu}
+# % of sequences assigned a genotype by each tool, for North America (region) and Europe
+# (the four European regions pooled), in 2020-2025 and 2022-2025. Repeated for the subset
+# with H5 clade labelled 2.3.4.4b (NA clade excluded from that subset).
+eu_regions <- c("Western Europe", "Northern Europe", "Southern Europe", "Eastern Europe")
+
+pct_assigned <- function(df, start_yr, clade_subset) {
+  df %>%
+    filter(collection_year >= start_yr, collection_year <= 2025) %>%
+    mutate(region_group = case_when(
+      region == "North America" ~ "North America",
+      region %in% eu_regions    ~ "Europe"
+    )) %>%
+    filter(!is.na(region_group)) %>%
+    group_by(region_group) %>%
+    summarise(n_total            = n(),
+              n_assigned_genoflu = sum(assigned_genoflu),
+              n_assigned_genin   = sum(assigned_genin),
+              .groups = "drop") %>%
+    mutate(period              = paste0(start_yr, "-2025"),
+           clade_subset        = clade_subset,
+           pct_assigned_genoflu = round(n_assigned_genoflu / n_total * 100, 1),
+           pct_assigned_genin   = round(n_assigned_genin   / n_total * 100, 1)) %>%
+    select(clade_subset, period, region_group, n_total,
+           n_assigned_genoflu, pct_assigned_genoflu,
+           n_assigned_genin,   pct_assigned_genin)
+}
+
+combined_2344b <- combined %>% filter(clade == "2.3.4.4b")
+
+pct_na_eu <- bind_rows(
+  pct_assigned(combined,       2020, "all"),
+  pct_assigned(combined,       2022, "all"),
+  pct_assigned(combined_2344b, 2020, "2.3.4.4b"),
+  pct_assigned(combined_2344b, 2022, "2.3.4.4b")
+)
+pct_na_eu
+write.csv(pct_na_eu, paste0(f.out, "pct_assigned_northamerica_europe_2020-2025_2022-2025.csv"), row.names = FALSE)
+```
+
+## Write output
+
+```{r write}
+write.csv(combined,         paste0(f.out, "combined_genotyping_meta.csv"),                row.names = FALSE)
+write.csv(reg_compare,      paste0(f.out, "region_assignment_comparison.csv"),            row.names = FALSE)
+write.csv(reg_compare_2020, paste0(f.out, "region_assignment_comparison_since2020.csv"),  row.names = FALSE)
+```
