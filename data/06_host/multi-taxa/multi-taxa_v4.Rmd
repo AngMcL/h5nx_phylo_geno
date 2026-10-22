@@ -1,0 +1,686 @@
+---
+title: "multi-taxa"
+author: "It's me! Angela!"
+date: "2026-01-27"
+output: html_document
+---
+
+## Update 2026-06-18:
+* Host lookup updated to use complete_host_taxa_with_ecogroup_fixed.csv (mallard fix)
+* Renamed taxa2 to taxa1p (1% of total N threshold)
+* Added taxa1000: same cascade with minimum N = 1000
+* Added taxa2000: same cascade with minimum N = 2000
+* Added taxa2000h: taxa2000 with Homo sapiens forced as its own category regardless of N
+* Added taxa5000: same cascade with minimum N = 5000
+* Treemap legend font increased ~40% (8 to 11); export dimensions increased to 1300 × 1000
+
+## Objectives
+* Group hosts into multi-taxa consisting of species (where N sample >= 1% total rows), else genus (N>= 1%), else family (N>= 1%), else order (N>= 1%), else class
+* Exclude environmental, insecta, food products
+* export a table of the common hosts within each of my multi-taxa levels
+
+# Setup
+
+## Libs
+```{r}
+library(tidyverse)
+library(RColorBrewer)
+library(patchwork)
+library(gtools)
+```
+## plotting
+```{r}
+plot.theme<-theme(panel.grid.minor=element_blank(),
+                  panel.background=element_rect("grey95"),
+                  axis.line=element_line(colour="black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle=45,hjust=1,vjust=1))
+```
+
+## Ins and outs
+```{r}
+# Segment list
+segments.ms<-c("PB2","PB1","PA","HA","NP","NA","M","NS") %>% mixedsort()
+
+# Metadata (host, sample)
+met.f.in<-"../../../phylo/01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+met.files<-list.files(met.f.in, pattern="resid.csv", full.names=TRUE)
+
+# detect segment for each metadata file
+met.seg<-sapply(basename(met.files), function(x) {
+  m<-regmatches(x, regexpr("PB2|PB1|PA|HA|NP|NA|M|NS", x))
+  ifelse(length(m) == 0, NA, m)
+})
+
+# re-order metadata files to match segments.ms; drop segments with no _fixed.csv
+met.in<-setNames(met.files[match(segments.ms, met.seg)], segments.ms)
+met.in<-met.in[!is.na(met.in)]
+
+#host lookup data
+host.look.in<-"../../../data/06_host/2026-01-27_out/complete_host_taxa_with_ecogroup_fixed.csv"
+
+# Output directory
+f.out<-paste0(Sys.Date(),"_out/")
+if (!dir.exists(f.out)) dir.create(f.out, recursive=TRUE)
+```
+
+# Group hosts into multi-taxa by frequency
+## Load in metadata and connect to host taxa
+```{r}
+# Load metadata for each segment
+seggs<-lapply(met.in, function(f) {
+  read.csv(f) %>% select(host, sample)})
+
+# Bind metadata across segments and remove duplicates
+all.seggs<-bind_rows(seggs) %>%
+    distinct(sample, .keep_all = TRUE)
+all.seggs$host.old<-all.seggs$host #same naming as in the lookup
+
+# Host lookup
+host.look<-read.csv(host.look.in)
+
+#full match?
+length(which(all.seggs$host.old %in% host.look$host.old))==nrow(all.seggs)
+
+## Join all seggs to host.look ##
+#Join taxonomic taxa
+all.taxa<-left_join(all.seggs, host.look, by="host.old")
+
+## ASSIGN taxa based on frequency of species detection
+all.taxa$taxa<-all.taxa$species #default to species
+all.taxa$taxa_level<-"species" #TRACK the taxa level
+N<-nrow(all.taxa)
+minN<-floor(N/100) #413 is 1%
+
+#if a species is found in <1% of samples, then change to genus.
+t<-table(all.taxa$taxa)
+toofew<-names(t)[which(t<minN)]
+index.few<-which(all.taxa$taxa %in% toofew)
+#species==NA (only more generic avail)
+index.na<-which(is.na(all.taxa$taxa))
+#add to too few those with
+index.few.na<-unique(c(index.few, index.na))
+all.taxa$taxa[index.few.na]<-all.taxa$genus[index.few.na]
+all.taxa$taxa_level[index.few.na]<-"genus"
+
+# If still accounts for <1% of samples, merge into family
+t2<-table(all.taxa$taxa)
+toofew2<-names(t2)[which(t2<minN)]
+index.few2<-which(all.taxa$taxa %in% toofew2)
+index.na2<-which(is.na(all.taxa$taxa))
+index.few.na2<-unique(c(index.few2, index.na2))
+all.taxa$taxa[index.few.na2]<-all.taxa$family[index.few.na2]
+all.taxa$taxa_level[index.few.na2]<-"family"
+#check
+# table(all.taxa$taxa)
+# table(all.taxa$taxa[all.taxa$taxa_level=="genus"])
+#  Anas  Anser Branta Corvus Cygnus  Larus Mareca
+
+# If still accounts for <1% of samples, merge into order
+t3<-table(all.taxa$taxa)
+toofew3<-names(t3)[which(t3<minN)]
+index.few3<-which(all.taxa$taxa %in% toofew3)
+index.na3<-which(is.na(all.taxa$taxa))
+index.few.na3<-unique(c(index.few3, index.na3))
+all.taxa$taxa[index.few.na3]<-all.taxa$order[index.few.na3]
+all.taxa$taxa_level[index.few.na3]<-"order"
+
+#last chance: class
+t4<-table(all.taxa$taxa)
+toofew4<-names(t4)[which(t4<minN)] #moved this back to the minN used for other taxa levels in V3
+index.few4<-which(all.taxa$taxa %in% toofew4)
+index.na4<-which(is.na(all.taxa$taxa))
+index.few.na4<-unique(c(index.few4, index.na4))
+all.taxa$taxa[index.few.na4]<-all.taxa$class[index.few.na4]
+all.taxa$taxa_level[index.few.na4]<-"class"
+
+#CHECK
+# table(all.taxa$taxa[all.taxa$taxa_level=="family"])
+# # Accipitridae     Anatidae      Laridae
+# table(all.taxa$taxa[all.taxa$taxa_level=="order"])
+# t4<-sort(table(all.taxa$taxa), decreasing = T);t4
+# sort(table(all.taxa$taxa_level), decreasing = T)
+
+# append "Other" before the taxa if there is a higher level occurrence of it
+taxa.vec2<-taxa.vec<-unique(all.taxa$taxa)
+for (i in 1:length(taxa.vec)){
+  #if species, skip.
+  if(all.taxa$taxa_level[all.taxa$taxa==taxa.vec[i]][1]=="species"){next}
+  less<-all.taxa %>% filter(taxa != taxa.vec[i]) #all but its members
+  less.all<-unique(c(less$class, less$order, less$family, less$genus, less$species))
+  less.all<-less.all[!is.na(less.all)]
+  if(any(less.all ==taxa.vec[i])){taxa.vec2[i]<-paste0("Other ",taxa.vec[i])}
+}
+# anchor the patterns for exact match
+taxa.vec.pat<- paste0("^", taxa.vec, "$")
+repl <- setNames(taxa.vec2, taxa.vec.pat)
+all.taxa$taxa<-str_replace_all(all.taxa$taxa,repl)
+
+# table(all.taxa$taxa)
+length(table(all.taxa$taxa)) #47 categories (going to remove environemtn and insecta and food products), so actually 44
+#After v3 change ???
+```
+
+## Export the final data set of grouped multi-taxa hosts
+```{r}
+#reduce cols
+all.taxa<-all.taxa %>% select("sample","taxa","taxa_level","common","host.old","class","family","order","genus","species","eco_group")
+
+# export a summary table with the common hosts within the multi taxa
+taxa.sum.table<-all.taxa %>%
+  group_by(taxa_level, taxa) %>%
+  summarize(n_rows = n(),# count rows in this taxa group
+    common_hosts = str_c(unique(common), collapse = ", "), # distinct hosts
+    .groups = "drop") %>%
+  arrange(desc(n_rows))
+
+taxa.sum.table<-taxa.sum.table%>%
+  arrange(-n_rows)
+tax.ord<-taxa.sum.table$taxa
+taxa.sum.table$taxa<-factor(taxa.sum.table$taxa, levels=tax.ord)
+taxa.sum.table$taxa_level<-factor(taxa.sum.table$taxa_level, levels=c("species","genus","family","order","class"))
+
+#quick plot here:
+taxa.sum.table %>%
+  filter(!taxa %in% c("Insecta","Environment","Food products")) %>%
+  ggplot()+
+  geom_bar(aes(x=taxa, y=n_rows, fill=taxa_level),stat="identity")+
+  labs(x="Taxa",y="N sample")+
+  plot.theme
+ggsave(paste0(f.out, "multi-taxa_freq_levels_counts.png"))
+```
+
+## Optional: convert the multi-taxa into common names
+```{r}
+taxa.sum.table$taxa1p<-as.character(taxa.sum.table$taxa)
+
+#take single common host where species level
+taxa.sum.table$taxa1p[which(taxa.sum.table$taxa_level=="species")]<-taxa.sum.table$common_hosts[which(taxa.sum.table$taxa_level=="species")]
+
+## Do the same with the sample-level df (used in the partition script)
+all.taxa$taxa1p<-as.character(all.taxa$taxa)
+
+#take single common (not common_host, as above, but same same) where species level
+all.taxa$taxa1p[which(all.taxa$taxa_level=="species")]<-all.taxa$common[which(all.taxa$taxa_level=="species")]
+all(names(table(all.taxa$taxa1p)) %in% names(table(taxa.sum.table$taxa1p)))
+#genus# taxa.sum.table$taxa1p<-str_replace_all(taxa.sum.table$taxa1p, c("Other Anser"="Other geese",
+#                                          "Larus$"="Gulls",
+#                                          "Corvus$"="Corvus",
+#                                          "Other Cygnus"="Other swans",
+#                                          "Other Anas"="Other ducks"))
+```
+
+## Plot multi-taxa
+```{r}
+## with common for species
+tax1p.ord<-taxa.sum.table$taxa1p
+taxa.sum.table$taxa1p<-factor(taxa.sum.table$taxa1p, levels=tax1p.ord)
+
+taxa.sum.table %>%
+  filter(!taxa %in% c("Insecta","Environment","Food products")) %>%
+  ggplot()+
+  geom_bar(aes(x=taxa1p, y=n_rows, fill=taxa_level),stat="identity")+
+  geom_text(aes(x=taxa1p, label=paste0(n_rows), y=n_rows),vjust=-0.1, size=2)+ #angle=90,hjust=-0.1,
+  labs(x="Taxa",y="N sample")+
+  plot.theme+
+  scale_y_continuous(expand = expansion(mult=c(0.01,0.13)))+
+  theme(legend.position=c(0.9,0.9), legend.justification=c(1,1))
+ ggsave(paste0(f.out, "multi-taxa_freq_levels_counts_commonspec.png"), height=4, width=7)
+```
+
+## EXPORT
+```{r}
+#export the taxa summary once this folder def'd
+write.csv(taxa.sum.table, paste0(f.out, "multi-taxa_summary_hosts.csv"))
+write.csv(all.taxa, paste0(f.out, "all-taxa.csv"))
+taxa.sum.table[which(taxa.sum.table$n_rows<20),]
+```
+
+## Sample taxa lookup
+```{r}
+# keyed by sample so downstream scripts join by sample, not host.old
+samp.look <- all.taxa %>%
+  select(sample, taxa, taxa_level, taxa1p, common, class, order, family, genus, species, eco_group)
+
+write.csv(samp.look, paste0(f.out, "sample_taxa_lookup.csv"), row.names=FALSE)
+```
+
+## repeat treemaps for multitaxa
+```{r}
+library(treemap)
+
+taxa2.cols <- setNames(brewer.pal(5, "Set2"), c("species","genus","family","order","class"))
+excl <- c("Insecta","Environment","Food products")
+```
+
+```{r}
+# taxa1p vs common host
+tm.common <- all.taxa %>%
+  filter(!taxa %in% excl) %>%
+  group_by(taxa_level, taxa1p, common) %>%
+  summarize(.groups="rowwise", tot=n())
+
+tiff(paste0(f.out,"treemap_taxa1p_common.tiff"), width=1300, height=1000)
+treemap(tm.common,
+        index=c("taxa1p","common"),
+        vSize="tot",
+        vColor="taxa_level",
+        type="categorical",
+        palette=taxa2.cols,
+        align.labels=list(c("left","top"), c("right","bottom")),
+        border.col="white",
+        bg.labels=255,
+        fontsize.legend=11,
+        fontsize.labels=12,
+        overlap.labels=0.8)
+dev.off()
+```
+
+```{r}
+# taxa1p vs order
+tm.order <- all.taxa %>%
+  filter(!taxa %in% excl, !is.na(order)) %>%
+  group_by(taxa1p, order) %>%
+  summarize(.groups="rowwise", tot=n())
+
+ord.cols <- colorRampPalette(brewer.pal(8, "Dark2"))(length(unique(tm.order$order)))
+
+tiff(paste0(f.out,"treemap_taxa1p_order.tiff"), width=1300, height=1000)
+treemap(tm.order,
+        index=c("taxa1p","order"),
+        vSize="tot",
+        vColor="order",
+        type="categorical",
+        palette=ord.cols,
+        align.labels=list(c("left","top"), c("right","bottom")),
+        border.col="white",
+        bg.labels=255,
+        fontsize.legend=11,
+        fontsize.labels=12,
+        overlap.labels=0.8)
+dev.off()
+```
+
+# taxa1000: broader grouping with minimum N = 1000
+```{r}
+minN1000 <- 1000
+
+all.taxa$taxa1000 <- all.taxa$species
+all.taxa$taxa1000_level <- "species"
+
+t1000a <- table(all.taxa$taxa1000)
+toofew1000a <- names(t1000a)[which(t1000a < minN1000)]
+idx1000a <- unique(c(which(all.taxa$taxa1000 %in% toofew1000a), which(is.na(all.taxa$taxa1000))))
+all.taxa$taxa1000[idx1000a] <- all.taxa$genus[idx1000a]
+all.taxa$taxa1000_level[idx1000a] <- "genus"
+
+t1000b <- table(all.taxa$taxa1000)
+toofew1000b <- names(t1000b)[which(t1000b < minN1000)]
+idx1000b <- unique(c(which(all.taxa$taxa1000 %in% toofew1000b), which(is.na(all.taxa$taxa1000))))
+all.taxa$taxa1000[idx1000b] <- all.taxa$family[idx1000b]
+all.taxa$taxa1000_level[idx1000b] <- "family"
+
+t1000c <- table(all.taxa$taxa1000)
+toofew1000c <- names(t1000c)[which(t1000c < minN1000)]
+idx1000c <- unique(c(which(all.taxa$taxa1000 %in% toofew1000c), which(is.na(all.taxa$taxa1000))))
+all.taxa$taxa1000[idx1000c] <- all.taxa$order[idx1000c]
+all.taxa$taxa1000_level[idx1000c] <- "order"
+
+t1000d <- table(all.taxa$taxa1000)
+toofew1000d <- names(t1000d)[which(t1000d < minN1000)]
+idx1000d <- unique(c(which(all.taxa$taxa1000 %in% toofew1000d), which(is.na(all.taxa$taxa1000))))
+all.taxa$taxa1000[idx1000d] <- all.taxa$class[idx1000d]
+all.taxa$taxa1000_level[idx1000d] <- "class"
+
+# "Other X" prefix where a higher-level taxon name also appears as a lower-level label
+taxa1000.vec2 <- taxa1000.vec <- unique(all.taxa$taxa1000)
+for (i in 1:length(taxa1000.vec)){
+  if(all.taxa$taxa1000_level[all.taxa$taxa1000 == taxa1000.vec[i]][1] == "species"){next}
+  less1000 <- all.taxa %>% filter(taxa1000 != taxa1000.vec[i])
+  less1000.all <- unique(c(less1000$class, less1000$order, less1000$family, less1000$genus, less1000$species))
+  less1000.all <- less1000.all[!is.na(less1000.all)]
+  if(any(less1000.all == taxa1000.vec[i])){taxa1000.vec2[i] <- paste0("Other ", taxa1000.vec[i])}
+}
+taxa1000.vec.pat <- paste0("^", taxa1000.vec, "$")
+repl1000 <- setNames(taxa1000.vec2, taxa1000.vec.pat)
+all.taxa$taxa1000 <- str_replace_all(all.taxa$taxa1000, repl1000)
+
+# common name where species level
+all.taxa$taxa1000_2 <- as.character(all.taxa$taxa1000)
+all.taxa$taxa1000_2[which(all.taxa$taxa1000_level == "species")] <- all.taxa$common[which(all.taxa$taxa1000_level == "species")]
+
+sort(table(all.taxa$taxa1000), decreasing=TRUE)
+sort(table(all.taxa$taxa1000_level), decreasing=TRUE)
+```
+
+## taxa1000 summary table and plot
+```{r}
+taxa1000.sum <- all.taxa %>%
+  group_by(taxa1000_level, taxa1000, taxa1000_2) %>%
+  summarize(n_rows=n(),
+    common_hosts=str_c(unique(common), collapse=", "),
+    .groups="drop") %>%
+  arrange(desc(n_rows))
+
+tax1000.ord <- taxa1000.sum$taxa1000_2
+taxa1000.sum$taxa1000_2 <- factor(taxa1000.sum$taxa1000_2, levels=tax1000.ord)
+taxa1000.sum$taxa1000_level <- factor(taxa1000.sum$taxa1000_level, levels=c("species","genus","family","order","class"))
+
+taxa1000.sum %>%
+  filter(!taxa1000 %in% excl) %>%
+  ggplot()+
+  geom_bar(aes(x=taxa1000_2, y=n_rows, fill=taxa1000_level), stat="identity")+
+  geom_text(aes(x=taxa1000_2, label=n_rows, y=n_rows), vjust=-0.1, size=2)+
+  labs(x="Taxa1000", y="N sample")+
+  plot.theme+
+  scale_y_continuous(expand=expansion(mult=c(0.01, 0.13)))+
+  theme(legend.position=c(0.9, 0.9), legend.justification=c(1, 1))
+ggsave(paste0(f.out, "multi-taxa1000_freq_levels_counts.png"), height=4, width=7)
+```
+
+## taxa1000 treemap
+```{r}
+tm1000.common <- all.taxa %>%
+  filter(!taxa1000 %in% excl) %>%
+  group_by(taxa1000_level, taxa1000_2, common) %>%
+  summarize(.groups="rowwise", tot=n())
+
+tiff(paste0(f.out, "treemap_taxa1000_common.tiff"), width=1300, height=1000)
+treemap(tm1000.common,
+        index=c("taxa1000_2", "common"),
+        vSize="tot",
+        vColor="taxa1000_level",
+        type="categorical",
+        palette=taxa2.cols,
+        align.labels=list(c("left","top"), c("right","bottom")),
+        border.col="white",
+        bg.labels=255,
+        fontsize.legend=11,
+        fontsize.labels=12,
+        overlap.labels=0.8)
+dev.off()
+```
+
+# taxa2000: broader grouping with minimum N = 2000
+```{r}
+minN2000 <- 2000
+
+all.taxa$taxa2000 <- all.taxa$species
+all.taxa$taxa2000_level <- "species"
+
+t2000a <- table(all.taxa$taxa2000)
+toofew2000a <- names(t2000a)[which(t2000a < minN2000)]
+idx2000a <- unique(c(which(all.taxa$taxa2000 %in% toofew2000a), which(is.na(all.taxa$taxa2000))))
+all.taxa$taxa2000[idx2000a] <- all.taxa$genus[idx2000a]
+all.taxa$taxa2000_level[idx2000a] <- "genus"
+
+t2000b <- table(all.taxa$taxa2000)
+toofew2000b <- names(t2000b)[which(t2000b < minN2000)]
+idx2000b <- unique(c(which(all.taxa$taxa2000 %in% toofew2000b), which(is.na(all.taxa$taxa2000))))
+all.taxa$taxa2000[idx2000b] <- all.taxa$family[idx2000b]
+all.taxa$taxa2000_level[idx2000b] <- "family"
+
+t2000c <- table(all.taxa$taxa2000)
+toofew2000c <- names(t2000c)[which(t2000c < minN2000)]
+idx2000c <- unique(c(which(all.taxa$taxa2000 %in% toofew2000c), which(is.na(all.taxa$taxa2000))))
+all.taxa$taxa2000[idx2000c] <- all.taxa$order[idx2000c]
+all.taxa$taxa2000_level[idx2000c] <- "order"
+
+t2000d <- table(all.taxa$taxa2000)
+toofew2000d <- names(t2000d)[which(t2000d < minN2000)]
+idx2000d <- unique(c(which(all.taxa$taxa2000 %in% toofew2000d), which(is.na(all.taxa$taxa2000))))
+all.taxa$taxa2000[idx2000d] <- all.taxa$class[idx2000d]
+all.taxa$taxa2000_level[idx2000d] <- "class"
+
+# "Other X" prefix where a higher-level taxon name also appears as a lower-level label
+taxa2000.vec2 <- taxa2000.vec <- unique(all.taxa$taxa2000)
+for (i in 1:length(taxa2000.vec)){
+  if(all.taxa$taxa2000_level[all.taxa$taxa2000 == taxa2000.vec[i]][1] == "species"){next}
+  less2000 <- all.taxa %>% filter(taxa2000 != taxa2000.vec[i])
+  less2000.all <- unique(c(less2000$class, less2000$order, less2000$family, less2000$genus, less2000$species))
+  less2000.all <- less2000.all[!is.na(less2000.all)]
+  if(any(less2000.all == taxa2000.vec[i])){taxa2000.vec2[i] <- paste0("Other ", taxa2000.vec[i])}
+}
+taxa2000.vec.pat <- paste0("^", taxa2000.vec, "$")
+repl2000 <- setNames(taxa2000.vec2, taxa2000.vec.pat)
+all.taxa$taxa2000 <- str_replace_all(all.taxa$taxa2000, repl2000)
+
+# common name where species level
+all.taxa$taxa2000_2 <- as.character(all.taxa$taxa2000)
+all.taxa$taxa2000_2[which(all.taxa$taxa2000_level == "species")] <- all.taxa$common[which(all.taxa$taxa2000_level == "species")]
+
+sort(table(all.taxa$taxa2000), decreasing=TRUE)
+sort(table(all.taxa$taxa2000_level), decreasing=TRUE)
+```
+
+## taxa2000 summary table and plot
+```{r}
+taxa2000.sum <- all.taxa %>%
+  group_by(taxa2000_level, taxa2000, taxa2000_2) %>%
+  summarize(n_rows=n(),
+    common_hosts=str_c(unique(common), collapse=", "),
+    .groups="drop") %>%
+  arrange(desc(n_rows))
+
+tax2000.ord <- taxa2000.sum$taxa2000_2
+taxa2000.sum$taxa2000_2 <- factor(taxa2000.sum$taxa2000_2, levels=tax2000.ord)
+taxa2000.sum$taxa2000_level <- factor(taxa2000.sum$taxa2000_level, levels=c("species","genus","family","order","class"))
+
+taxa2000.sum %>%
+  filter(!taxa2000 %in% excl) %>%
+  ggplot()+
+  geom_bar(aes(x=taxa2000_2, y=n_rows, fill=taxa2000_level), stat="identity")+
+  geom_text(aes(x=taxa2000_2, label=n_rows, y=n_rows), vjust=-0.1, size=2)+
+  labs(x="Taxa2000", y="N sample")+
+  plot.theme+
+  scale_y_continuous(expand=expansion(mult=c(0.01, 0.13)))+
+  theme(legend.position=c(0.9, 0.9), legend.justification=c(1, 1))
+ggsave(paste0(f.out, "multi-taxa2000_freq_levels_counts.png"), height=4, width=7)
+```
+
+## taxa2000 treemap
+```{r}
+tm2000.common <- all.taxa %>%
+  filter(!taxa2000 %in% excl) %>%
+  group_by(taxa2000_level, taxa2000_2, common) %>%
+  summarize(.groups="rowwise", tot=n())
+
+tiff(paste0(f.out, "treemap_taxa2000_common.tiff"), width=1300, height=1000)
+treemap(tm2000.common,
+        index=c("taxa2000_2", "common"),
+        vSize="tot",
+        vColor="taxa2000_level",
+        type="categorical",
+        palette=taxa2.cols,
+        align.labels=list(c("left","top"), c("right","bottom")),
+        border.col="white",
+        bg.labels=255,
+        fontsize.legend=11,
+        fontsize.labels=12,
+        overlap.labels=0.8)
+dev.off()
+```
+
+# taxa2000h: taxa2000 with Homo sapiens forced as its own category
+```{r}
+all.taxa$taxa2000h <- all.taxa$taxa2000
+all.taxa$taxa2000h_level <- all.taxa$taxa2000_level
+
+idx.human <- which(all.taxa$species == "Homo sapiens")
+all.taxa$taxa2000h[idx.human] <- "Homo sapiens"
+all.taxa$taxa2000h_level[idx.human] <- "species"
+
+all.taxa$taxa2000h_2 <- as.character(all.taxa$taxa2000h)
+all.taxa$taxa2000h_2[which(all.taxa$taxa2000h_level == "species")] <- all.taxa$common[which(all.taxa$taxa2000h_level == "species")]
+
+sort(table(all.taxa$taxa2000h), decreasing=TRUE)
+sort(table(all.taxa$taxa2000h_level), decreasing=TRUE)
+```
+
+## taxa2000h summary table and plot
+```{r}
+taxa2000h.sum <- all.taxa %>%
+  group_by(taxa2000h_level, taxa2000h, taxa2000h_2) %>%
+  summarize(n_rows=n(),
+    common_hosts=str_c(unique(common), collapse=", "),
+    .groups="drop") %>%
+  arrange(desc(n_rows))
+
+tax2000h.ord <- taxa2000h.sum$taxa2000h_2
+taxa2000h.sum$taxa2000h_2 <- factor(taxa2000h.sum$taxa2000h_2, levels=tax2000h.ord)
+taxa2000h.sum$taxa2000h_level <- factor(taxa2000h.sum$taxa2000h_level, levels=c("species","genus","family","order","class"))
+
+taxa2000h.sum %>%
+  filter(!taxa2000h %in% excl) %>%
+  ggplot()+
+  geom_bar(aes(x=taxa2000h_2, y=n_rows, fill=taxa2000h_level), stat="identity")+
+  geom_text(aes(x=taxa2000h_2, label=n_rows, y=n_rows), vjust=-0.1, size=2)+
+  labs(x="Taxa2000h", y="N sample")+
+  plot.theme+
+  scale_y_continuous(expand=expansion(mult=c(0.01, 0.13)))+
+  theme(legend.position=c(0.9, 0.9), legend.justification=c(1, 1))
+ggsave(paste0(f.out, "multi-taxa2000h_freq_levels_counts.png"), height=4, width=7)
+```
+
+## taxa2000h treemap
+```{r}
+tm2000h.common <- all.taxa %>%
+  filter(!taxa2000h %in% excl) %>%
+  group_by(taxa2000h_level, taxa2000h_2, common) %>%
+  summarize(.groups="rowwise", tot=n())
+
+tiff(paste0(f.out, "treemap_taxa2000h_common.tiff"), width=1300, height=1000)
+treemap(tm2000h.common,
+        index=c("taxa2000h_2", "common"),
+        vSize="tot",
+        vColor="taxa2000h_level",
+        type="categorical",
+        palette=taxa2.cols,
+        align.labels=list(c("left","top"), c("right","bottom")),
+        border.col="white",
+        bg.labels=255,
+        fontsize.legend=11,
+        fontsize.labels=12,
+        overlap.labels=0.8)
+dev.off()
+```
+
+# taxa5000: broader grouping with minimum N = 5000
+```{r}
+minN5000 <- 5000
+
+all.taxa$taxa5000 <- all.taxa$species
+all.taxa$taxa5000_level <- "species"
+
+t5000a <- table(all.taxa$taxa5000)
+toofew5000a <- names(t5000a)[which(t5000a < minN5000)]
+idx5000a <- unique(c(which(all.taxa$taxa5000 %in% toofew5000a), which(is.na(all.taxa$taxa5000))))
+all.taxa$taxa5000[idx5000a] <- all.taxa$genus[idx5000a]
+all.taxa$taxa5000_level[idx5000a] <- "genus"
+
+t5000b <- table(all.taxa$taxa5000)
+toofew5000b <- names(t5000b)[which(t5000b < minN5000)]
+idx5000b <- unique(c(which(all.taxa$taxa5000 %in% toofew5000b), which(is.na(all.taxa$taxa5000))))
+all.taxa$taxa5000[idx5000b] <- all.taxa$family[idx5000b]
+all.taxa$taxa5000_level[idx5000b] <- "family"
+
+t5000c <- table(all.taxa$taxa5000)
+toofew5000c <- names(t5000c)[which(t5000c < minN5000)]
+idx5000c <- unique(c(which(all.taxa$taxa5000 %in% toofew5000c), which(is.na(all.taxa$taxa5000))))
+all.taxa$taxa5000[idx5000c] <- all.taxa$order[idx5000c]
+all.taxa$taxa5000_level[idx5000c] <- "order"
+
+t5000d <- table(all.taxa$taxa5000)
+toofew5000d <- names(t5000d)[which(t5000d < minN5000)]
+idx5000d <- unique(c(which(all.taxa$taxa5000 %in% toofew5000d), which(is.na(all.taxa$taxa5000))))
+all.taxa$taxa5000[idx5000d] <- all.taxa$class[idx5000d]
+all.taxa$taxa5000_level[idx5000d] <- "class"
+
+# "Other X" prefix where a higher-level taxon name also appears as a lower-level label
+taxa5000.vec2 <- taxa5000.vec <- unique(all.taxa$taxa5000)
+for (i in 1:length(taxa5000.vec)){
+  if(all.taxa$taxa5000_level[all.taxa$taxa5000 == taxa5000.vec[i]][1] == "species"){next}
+  less5000 <- all.taxa %>% filter(taxa5000 != taxa5000.vec[i])
+  less5000.all <- unique(c(less5000$class, less5000$order, less5000$family, less5000$genus, less5000$species))
+  less5000.all <- less5000.all[!is.na(less5000.all)]
+  if(any(less5000.all == taxa5000.vec[i])){taxa5000.vec2[i] <- paste0("Other ", taxa5000.vec[i])}
+}
+taxa5000.vec.pat <- paste0("^", taxa5000.vec, "$")
+repl5000 <- setNames(taxa5000.vec2, taxa5000.vec.pat)
+all.taxa$taxa5000 <- str_replace_all(all.taxa$taxa5000, repl5000)
+
+# common name where species level
+all.taxa$taxa5000_2 <- as.character(all.taxa$taxa5000)
+all.taxa$taxa5000_2[which(all.taxa$taxa5000_level == "species")] <- all.taxa$common[which(all.taxa$taxa5000_level == "species")]
+
+sort(table(all.taxa$taxa5000), decreasing=TRUE)
+sort(table(all.taxa$taxa5000_level), decreasing=TRUE)
+```
+
+## taxa5000 summary table and plot
+```{r}
+taxa5000.sum <- all.taxa %>%
+  group_by(taxa5000_level, taxa5000, taxa5000_2) %>%
+  summarize(n_rows=n(),
+    common_hosts=str_c(unique(common), collapse=", "),
+    .groups="drop") %>%
+  arrange(desc(n_rows))
+
+tax5000.ord <- taxa5000.sum$taxa5000_2
+taxa5000.sum$taxa5000_2 <- factor(taxa5000.sum$taxa5000_2, levels=tax5000.ord)
+taxa5000.sum$taxa5000_level <- factor(taxa5000.sum$taxa5000_level, levels=c("species","genus","family","order","class"))
+
+taxa5000.sum %>%
+  filter(!taxa5000 %in% excl) %>%
+  ggplot()+
+  geom_bar(aes(x=taxa5000_2, y=n_rows, fill=taxa5000_level), stat="identity")+
+  geom_text(aes(x=taxa5000_2, label=n_rows, y=n_rows), vjust=-0.1, size=2)+
+  labs(x="Taxa5000", y="N sample")+
+  plot.theme+
+  scale_y_continuous(expand=expansion(mult=c(0.01, 0.13)))+
+  theme(legend.position=c(0.9, 0.9), legend.justification=c(1, 1))
+ggsave(paste0(f.out, "multi-taxa5000_freq_levels_counts.png"), height=4, width=7)
+```
+
+## taxa5000 treemap
+```{r}
+tm5000.common <- all.taxa %>%
+  filter(!taxa5000 %in% excl) %>%
+  group_by(taxa5000_level, taxa5000_2, common) %>%
+  summarize(.groups="rowwise", tot=n())
+
+tiff(paste0(f.out, "treemap_taxa5000_common.tiff"), width=1300, height=1000)
+treemap(tm5000.common,
+        index=c("taxa5000_2", "common"),
+        vSize="tot",
+        vColor="taxa5000_level",
+        type="categorical",
+        palette=taxa2.cols,
+        align.labels=list(c("left","top"), c("right","bottom")),
+        border.col="white",
+        bg.labels=255,
+        fontsize.legend=11,
+        fontsize.labels=12,
+        overlap.labels=0.8)
+dev.off()
+```
+
+## Export all groupings
+```{r}
+write.csv(taxa1000.sum, paste0(f.out, "multi-taxa1000_summary_hosts.csv"), row.names=FALSE)
+write.csv(taxa2000.sum, paste0(f.out, "multi-taxa2000_summary_hosts.csv"), row.names=FALSE)
+write.csv(taxa2000h.sum, paste0(f.out, "multi-taxa2000h_summary_hosts.csv"), row.names=FALSE)
+write.csv(taxa5000.sum, paste0(f.out, "multi-taxa5000_summary_hosts.csv"), row.names=FALSE)
+
+# full sample lookup with all grouping levels
+samp.look.all <- all.taxa %>%
+  select(sample, taxa, taxa_level, taxa1p,
+         taxa1000, taxa1000_level, taxa1000_2,
+         taxa2000, taxa2000_level, taxa2000_2,
+         taxa2000h, taxa2000h_level, taxa2000h_2,
+         taxa5000, taxa5000_level, taxa5000_2,
+         common, class, order, family, genus, species, eco_group)
+
+write.csv(samp.look.all, paste0(f.out, "sample_taxa_lookup_all.csv"), row.names=FALSE)
+```
