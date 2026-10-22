@@ -1,0 +1,558 @@
+"common","species","taxa_level","taxa1p","n_samples"
+"Chicken","Gallus gallus","species","Chicken",7905
+"Duck",NA,"family","Other Anatidae",4878
+"Cattle","Bos taurus","species","Cattle",4226
+"Turkey","Meleagris gallopavo","species","Turkey",2232
+"Canada goose","Branta canadensis","species","Canada goose",1334
+"Mallard","Anas platyrhynchos","species","Mallard",1177
+"Goose",NA,"genus","Other Anser",1019
+"Environment",NA,"class","Environment",869
+"Snow goose","Anser caerulescens","species","Snow goose",717
+"Mute swan","Cygnus olor","species","Mute swan",714
+"Unknown bird",NA,"class","Other Aves",646
+"Red-tailed hawk","Buteo jamaicensis","species","Red-tailed hawk",593
+"Black-headed gull","Chroicocephalus ridibundus","species","Black-headed gull",589
+"Gull",NA,"genus","Larus",545
+"Bald eagle","Haliaeetus leucocephalus","species","Bald eagle",540
+"Black vulture","Coragyps atratus","species","Black vulture",526
+"Great horned owl","Bubo virginianus","species","Great horned owl",503
+"Human","Homo sapiens","species","Human",472
+"Herring gull","Larus argentatus","genus","Larus",398
+"Muscovy duck","Cairina moschata","family","Other Anatidae",384
+"American crow","Corvus brachyrhynchos","genus","Corvus",355
+"Whooper swan","Cygnus cygnus","genus","Other Cygnus",310
+"Greylag goose","Anser anser","genus","Other Anser",279
+"Peregrine falcon","Falco peregrinus","class","Other Aves",268
+"Turkey vulture","Cathartes aura","class","Other Aves",256
+"Large-billed crow","Corvus macrorhynchos","genus","Corvus",223
+"Barnacle goose","Branta leucopsis","family","Other Anatidae",219
+"Cat","Felis catus","order","Carnivora",212
+"Blue-winged teal","Spatula discors","family","Other Anatidae",211
+"Great black-backed gull","Larus marinus","genus","Larus",209
+"Common buzzard","Buteo buteo","family","Other Accipitridae",206
+"Green-winged teal","Anas carolinensis","genus","Other Anas",201
+"Hooded crane","Grus monacha","class","Other Aves",189
+"Red fox","Vulpes vulpes","order","Carnivora",184
+"Swan",NA,"genus","Other Cygnus",178
+"Pheasant",NA,"order","Other Galliformes",173
+"Northern pintail","Anas acuta","genus","Other Anas",172
+"Northern gannet","Morus bassanus","class","Other Aves",165
+"Common tern","Sterna hirundo","family","Other Laridae",156
+"Guineafowl",NA,"order","Other Galliformes",156
+"Cackling goose","Branta hutchinsii","family","Other Anatidae",147
+"Bar-headed goose","Anser indicus","genus","Other Anser",144
+"American wigeon","Mareca americana","family","Other Anatidae",134
+"White-fronted goose","Anser albifrons","genus","Other Anser",134
+"Eurasian wigeon","Mareca penelope","family","Other Anatidae",126
+"Gadwall","Mareca strepera","family","Other Anatidae",126
+"Common eider","Somateria mollissima","family","Other Anatidae",125
+"Wood duck","Aix sponsa","family","Other Anatidae",121
+"Ross's goose","Anser rossii","genus","Other Anser",111
+"Striped skunk","Mephitis mephitis","order","Carnivora",99
+"Quail",NA,"order","Other Galliformes",98
+"Tundra swan","Cygnus columbianus","genus","Other Cygnus",92
+"Sandwich tern","Thalasseus sandvicensis","family","Other Laridae",88
+"Crow",NA,"genus","Corvus",84
+"Common teal","Anas crecca","genus","Other Anas",83
+"Pelican",NA,"class","Other Aves",83
+"Northern shoveler","Spatula clypeata","family","Other Anatidae",82
+"Mandarin duck","Aix galericulata","family","Other Anatidae",77
+"Sanderling","Calidris alba","order","Other Charadriiformes",76
+"American white pelican","Pelecanus erythrorhynchos","class","Other Aves",72
+"Common murre","Uria aalge","order","Other Charadriiformes",67
+"White-tailed eagle","Haliaeetus albicilla","family","Other Accipitridae",67
+"Double-crested cormorant","Phalacrocorax auritus","class","Other Aves",66
+"Arctic fox","Vulpes lagopus","order","Carnivora",65
+"Cooper's hawk","Accipiter cooperii","family","Other Accipitridae",65
+"Pink-footed goose","Anser brachyrhynchus","genus","Other Anser",64
+"Grey heron","Ardea cinerea","class","Other Aves",61
+"Fox",NA,"order","Carnivora",56
+"Trumpeter swan","Cygnus buccinator","genus","Other Cygnus",56
+"Common raven","Corvus corax","genus","Corvus",55
+"Black-legged kittiwake","Rissa tridactyla","family","Other Laridae",53
+"Spot-billed duck","Anas poecilorhyncha","genus","Other Anas",53
+"Bean goose","Anser fabalis","genus","Other Anser",52
+"Black-billed magpie","Pica hudsonia","class","Other Aves",52
+"Pigeon",NA,"class","Other Aves",52
+"Snowy owl","Bubo scandiacus","class","Other Aves",51
+"Tern",NA,"family","Other Laridae",51
+"Yellow-legged gull","Larus michahellis","genus","Larus",48
+"Waterbird",NA,"class","Other Aves",47
+"American black duck","Anas rubripes","genus","Other Anas",46
+"Egret","Ardea alba","class","Other Aves",46
+"Eurasian griffon vulture","Gyps fulvus","family","Other Accipitridae",46
+"Harbor seal","Phoca vitulina","order","Carnivora",46
+"Swine","Sus scrofa","class","Other Mammalia",46
+"Black swan","Cygnus atratus","genus","Other Cygnus",44
+"Indian peafowl","Pavo cristatus","order","Other Galliformes",44
+"Northern goshawk","Astur gentilis","family","Other Accipitridae",44
+"White stork","Ciconia ciconia","class","Other Aves",44
+"Mink","Neogale vison","order","Carnivora",43
+"Ruddy turnstone","Arenaria interpres","order","Other Charadriiformes",43
+"Hawk",NA,"family","Other Accipitridae",41
+"Skunk",NA,"order","Carnivora",41
+"Tufted duck","Aythya fuligula","family","Other Anatidae",41
+"Caspian tern","Hydroprogne caspia","family","Other Laridae",40
+"Common merganser","Mergus merganser","family","Other Anatidae",40
+"Asian openbill","Anastomus oscitans","class","Other Aves",38
+"Lesser scaup","Aythya affinis","family","Other Anatidae",38
+"Waterfowl",NA,"family","Other Anatidae",38
+"Falcon",NA,"class","Other Aves",36
+"White-naped crane","Antigone vipio","class","Other Aves",36
+"Bufflehead","Bucephala albeola","family","Other Anatidae",35
+"Hooded merganser","Lophodytes cucullatus","family","Other Anatidae",35
+"Baikal teal","Sibirionetta formosa","family","Other Anatidae",34
+"Brown-headed gull","Chroicocephalus brunnicephalus","family","Other Laridae",33
+"Glaucous gull","Larus hyperboreus","genus","Larus",33
+"Barred owl","Strix varia","class","Other Aves",32
+"Common gull","Larus canus","genus","Larus",32
+"Great blue heron","Ardea herodias","class","Other Aves",32
+"Red-shouldered hawk","Buteo lineatus","family","Other Accipitridae",32
+"Eurasian eagle-owl","Bubo bubo","class","Other Aves",31
+"Teal",NA,"genus","Other Anas",31
+"African penguin","Spheniscus demersus","class","Other Aves",30
+"Great crested grebe","Podiceps cristatus","class","Other Aves",30
+"Ring-necked duck","Aythya collaris","family","Other Anatidae",29
+"Ostrich","Struthio camelus","class","Other Aves",28
+"Ring-billed gull","Larus delawarensis","genus","Larus",28
+"Tiger","Panthera tigris","order","Carnivora",28
+"Western barn owl","Tyto alba","class","Other Aves",28
+"Common goldeneye","Bucephala clangula","family","Other Anatidae",27
+"Emu","Dromaius novaehollandiae","class","Other Aves",27
+"Glaucous-winged gull","Larus glaucescens","genus","Larus",27
+"Eared grebe","Podiceps nigricollis","class","Other Aves",26
+"Northern fulmar","Fulmarus glacialis","class","Other Aves",26
+"Carrion crow","Corvus corone","genus","Corvus",25
+"Owl",NA,"class","Other Aves",25
+"Sandhill crane","Antigone canadensis","class","Other Aves",25
+"Brant goose","Branta bernicla","family","Other Anatidae",24
+"Dunlin","Calidris alpina","order","Other Charadriiformes",24
+"Great cormorant","Phalacrocorax carbo","class","Other Aves",24
+"Rough-legged hawk","Buteo lagopus","family","Other Accipitridae",24
+"Western gull","Larus occidentalis","genus","Larus",24
+"Lesser black-backed gull","Larus fuscus","genus","Larus",23
+"Brown pelican","Pelecanus occidentalis","class","Other Aves",22
+"Raven",NA,"genus","Corvus",22
+"Common kestrel","Falco tinnunculus","class","Other Aves",21
+"Cormorant",NA,"class","Other Aves",21
+"Great skua","Stercorarius skua","order","Other Charadriiformes",21
+"Raccoon","Procyon lotor","order","Carnivora",21
+"Common pheasant","Phasianus colchicus","order","Other Galliformes",20
+"Red knot","Calidris canutus","order","Other Charadriiformes",19
+"Brown skua","Stercorarius lonnbergi","order","Other Charadriiformes",18
+"Common crane","Grus grus","class","Other Aves",18
+"Swift tern","Thalasseus bergii","family","Other Laridae",18
+"Red-breasted merganser","Mergus serrator","family","Other Anatidae",17
+"Royal tern","Thalasseus maximus","family","Other Laridae",17
+"Swainson's hawk","Buteo swainsoni","family","Other Accipitridae",17
+"Common loon","Gavia immer","class","Other Aves",16
+"Eurasian curlew","Numenius arquata","order","Other Charadriiformes",16
+"Horned grebe","Podiceps auritus","class","Other Aves",16
+"Partridge",NA,"order","Other Galliformes",16
+"Western grebe","Aechmophorus occidentalis","class","Other Aves",16
+"White-winged scoter","Melanitta fusca","family","Other Anatidae",16
+"Eagle",NA,"family","Other Accipitridae",15
+"Kelp gull","Larus dominicanus","genus","Larus",15
+"Magpie",NA,"class","Other Aves",15
+"Redhead duck","Aythya americana","family","Other Anatidae",15
+"Skua",NA,"order","Other Charadriiformes",15
+"South American sea lion","Otaria byronia","order","Carnivora",15
+"Caspian gull","Larus cachinnans","genus","Larus",14
+"Eastern buzzard","Buteo japonicus","family","Other Accipitridae",14
+"Grey seal","Halichoerus grypus","order","Carnivora",14
+"Mediterranean gull","Ichthyaetus melanocephalus","family","Other Laridae",14
+"Peruvian booby","Sula variegata","class","Other Aves",14
+"Arctic tern","Sterna paradisaea","family","Other Laridae",13
+"Common pochard","Aythya ferina","family","Other Anatidae",13
+"Razorbill","Alca torda","order","Other Charadriiformes",13
+"Bobcat","Lynx rufus","order","Carnivora",12
+"Mountain lion","Puma concolor","order","Carnivora",12
+"Rhea",NA,"class","Other Aves",12
+"Blue jay","Cyanocitta cristata","class","Other Aves",11
+"Common magpie","Pica pica","class","Other Aves",11
+"Eurasian sparrowhawk","Accipiter nisus","family","Other Accipitridae",11
+"Gannet",NA,"class","Other Aves",11
+"Goat","Capra hircus","class","Other Mammalia",11
+"Jackdaw","Coloeus monedula","class","Other Aves",11
+"Kittiwake",NA,"family","Other Laridae",11
+"Slaty-backed gull","Larus schistisagus","genus","Larus",11
+"Eurasian spoonbill","Platalea leucorodia","class","Other Aves",10
+"Greater flamingo","Phoenicopterus roseus","class","Other Aves",10
+"Grey goose",NA,"genus","Other Anser",10
+"Serval","Leptailurus serval","order","Carnivora",10
+"Southern elephant seal","Mirounga leonina","order","Carnivora",10
+"Tawny owl","Strix aluco","class","Other Aves",10
+"White-eyed pochard","Aythya nyroca","family","Other Anatidae",10
+"Black-necked grebe","Podiceps nigricollis","class","Other Aves",9
+"California condor","Gymnogyps californianus","class","Other Aves",9
+"Chukar","Alectoris chukar","order","Other Galliformes",9
+"Cinnamon teal","Spatula cyanoptera","family","Other Anatidae",9
+"Common grackle","Quiscalus quiscula","class","Other Aves",9
+"Garganey","Spatula querquedula","family","Other Anatidae",9
+"Guanay cormorant","Leucocarbo bougainvillii","class","Other Aves",9
+"Inca tern","Larosterna inca","family","Other Laridae",9
+"Little grebe","Tachybaptus ruficollis","class","Other Aves",9
+"Otter",NA,"order","Carnivora",9
+"Rock pigeon","Columba livia","class","Other Aves",9
+"Sea lion",NA,"order","Carnivora",9
+"South polar skua","Stercorarius maccormicki","order","Other Charadriiformes",9
+"Sparrow",NA,"class","Other Aves",9
+"Stork",NA,"class","Other Aves",9
+"White-faced whistling duck","Dendrocygna viduata","family","Other Anatidae",9
+"Grebe",NA,"class","Other Aves",8
+"Harris's hawk","Parabuteo unicinctus","family","Other Accipitridae",8
+"Long-eared owl","Asio otus","class","Other Aves",8
+"Ruddy shelduck","Tadorna ferruginea","family","Other Anatidae",8
+"Turtle dove",NA,"class","Other Aves",8
+"Band-tailed gull","Larus belcheri","genus","Larus",7
+"Eurasian coot","Fulica atra","class","Other Aves",7
+"Eurasian oystercatcher","Haematopus ostralegus","order","Other Charadriiformes",7
+"Fulmar",NA,"class","Other Aves",7
+"Grackle",NA,"class","Other Aves",7
+"Great black-headed gull","Ichthyaetus ichthyaetus","family","Other Laridae",7
+"Great-tailed grackle","Quiscalus mexicanus","class","Other Aves",7
+"Hartlaub's gull","Chroicocephalus hartlaubii","family","Other Laridae",7
+"Little egret","Egretta garzetta","class","Other Aves",7
+"Penguin",NA,"class","Other Aves",7
+"Pinniped",NA,"order","Carnivora",7
+"Red-crowned crane","Grus japonensis","class","Other Aves",7
+"Shorebird",NA,"order","Other Charadriiformes",7
+"Tree sparrow","Passer montanus","class","Other Aves",7
+"Alpaca","Vicugna pacos","class","Other Mammalia",6
+"Antarctic fur seal","Arctocephalus gazella","order","Carnivora",6
+"Barn swallow","Hirundo rustica","class","Other Aves",6
+"Black bear","Ursus americanus","order","Carnivora",6
+"Black-crowned night heron","Nycticorax nycticorax","class","Other Aves",6
+"Black-necked swan","Cygnus melancoryphus","genus","Other Cygnus",6
+"Black-tailed gull","Larus crassirostris","genus","Larus",6
+"Cape cormorant","Phalacrocorax capensis","class","Other Aves",6
+"Crested auklet","Aethia cristatella","order","Other Charadriiformes",6
+"Curlew",NA,"order","Other Charadriiformes",6
+"Egyptian goose","Alopochen aegyptiaca","family","Other Anatidae",6
+"Emperor goose","Anser canagicus","genus","Other Anser",6
+"Ferret","Mustela furo","order","Carnivora",6
+"Grey gull","Leucophaeus modestus","family","Other Laridae",6
+"Herons",NA,"class","Other Aves",6
+"Lynx",NA,"order","Carnivora",6
+"Peruvian pelican","Pelecanus thagus","class","Other Aves",6
+"Sharp-shinned hawk","Accipiter striatus","family","Other Accipitridae",6
+"Spectacled guillemot","Cepphus carbo","order","Other Charadriiformes",6
+"White mink","Mustela erminea","order","Carnivora",6
+"American coot","Fulica americana","class","Other Aves",5
+"Atlantic puffin","Fratercula arctica","order","Other Charadriiformes",5
+"Bottlenose dolphin",NA,"class","Other Mammalia",5
+"Common shelduck","Tadorna tadorna","family","Other Anatidae",5
+"Coot",NA,"class","Other Aves",5
+"Dove",NA,"class","Other Aves",5
+"Eurasian jay","Garrulus glandarius","class","Other Aves",5
+"Fish crow","Corvus ossifragus","genus","Corvus",5
+"Franklin's gull","Leucophaeus pipixcan","family","Other Laridae",5
+"Great white pelican","Pelecanus onocrotalus","class","Other Aves",5
+"Hawaiian goose",NA,"family","Other Anatidae",5
+"Osprey","Pandion haliaetus","class","Other Aves",5
+"Pacific black duck","Anas superciliosa","genus","Other Anas",5
+"Pika",NA,"class","Other Mammalia",5
+"Rook","Corvus frugilegus","genus","Corvus",5
+"Seal",NA,"order","Carnivora",5
+"South American tern","Sterna hirundinacea","family","Other Laridae",5
+"Spur-winged goose","Plectropterus gambensis","family","Other Anatidae",5
+"Thick-billed murre","Uria lomvia","order","Other Charadriiformes",5
+"Ancient murrelet","Synthliboramphus antiquus","order","Other Charadriiformes",4
+"Bearded vulture","Gypaetus barbatus","family","Other Accipitridae",4
+"Black skimmer","Rynchops niger","family","Other Laridae",4
+"Broad-winged hawk","Buteo platypterus","family","Other Accipitridae",4
+"Common blackbird","Turdus merula","class","Other Aves",4
+"Coscoroba swan","Coscoroba coscoroba","family","Other Anatidae",4
+"Cougar","Puma concolor","order","Carnivora",4
+"Dalmatian pelican","Pelecanus crispus","class","Other Aves",4
+"Dog","Canis lupus","order","Carnivora",4
+"Eurasian collared dove","Streptopelia decaocto","class","Other Aves",4
+"Greater scaup","Aythya marila","family","Other Anatidae",4
+"Gull-billed tern","Gelochelidon nilotica","family","Other Laridae",4
+"Gyrfalcon","Falco rusticolus","class","Other Aves",4
+"Horse","Equus caballus","class","Other Mammalia",4
+"Iceland gull","Larus glaucoides","genus","Larus",4
+"Lesser white-fronted goose","Anser erythropus","genus","Other Anser",4
+"Mouse","Mus musculus","class","Other Mammalia",4
+"Parasitic jaeger","Stercorarius parasiticus","order","Other Charadriiformes",4
+"Parrot",NA,"class","Other Aves",4
+"Raccoon dog","Nyctereutes procyonoides","order","Carnivora",4
+"Red-necked grebe","Podiceps grisegena","class","Other Aves",4
+"Rhinoceros auklet","Cerorhinca monocerata","order","Other Charadriiformes",4
+"Sandpiper",NA,"order","Other Charadriiformes",4
+"Sea otter","Enhydra lutris","order","Carnivora",4
+"Silver pheasant","Lophura nycthemera","order","Other Galliformes",4
+"Snowy plover","Anarhynchus nivosus","order","Other Charadriiformes",4
+"South American coati","Nasua nasua","order","Carnivora",4
+"Swan goose","Anser cygnoides","genus","Other Anser",4
+"Western marsh harrier","Circus aeruginosus","family","Other Accipitridae",4
+"African oystercatcher","Haematopus moquini","order","Other Charadriiformes",3
+"American goshawk","Astur atricapillus","family","Other Accipitridae",3
+"American kestrel","Falco sparverius","class","Other Aves",3
+"American robin","Turdus migratorius","class","Other Aves",3
+"Bear",NA,"order","Carnivora",3
+"Black kite","Milvus migrans","family","Other Accipitridae",3
+"Black scoter","Melanitta americana","family","Other Anatidae",3
+"Black-backed gull","Larus fuscus","genus","Larus",3
+"Blowfly",NA,"class","Insecta",3
+"Brown booby","Sula leucogaster","class","Other Aves",3
+"Burmeister's porpoise","Phocoena spinipinnis","class","Other Mammalia",3
+"California gull","Larus californicus","genus","Larus",3
+"Common quail","Coturnix coturnix","order","Other Galliformes",3
+"Eagle owl","Bubo bubo","class","Other Aves",3
+"Eurasian crane","Grus grus","class","Other Aves",3
+"European polecat","Mustela putorius","order","Carnivora",3
+"Japanese white-eye","Zosterops japonicus","class","Other Aves",3
+"Laughing gull","Leucophaeus atricilla","family","Other Laridae",3
+"Lion","Panthera leo","order","Carnivora",3
+"Little gull","Hydrocoloeus minutus","family","Other Laridae",3
+"Magpie robin",NA,"class","Other Aves",3
+"Merganser",NA,"family","Other Anatidae",3
+"Nasua nasua","Nasua nasua","order","Carnivora",3
+"Neotropic cormorant","Phalacrocorax brasilianus","class","Other Aves",3
+"Northern lapwing","Vanellus vanellus","order","Other Charadriiformes",3
+"Northwestern crow","Corvus caurinus","genus","Corvus",3
+"Oystercatcher",NA,"order","Other Charadriiformes",3
+"Polecat",NA,"order","Carnivora",3
+"Purple heron","Ardea purpurea","class","Other Aves",3
+"Raptor",NA,"class","Other Aves",3
+"Raw pet food",NA,"class","Food products",3
+"Sabine's gull","Xema sabini","family","Other Laridae",3
+"Sacred ibis","Threskiornis aethiopicus","class","Other Aves",3
+"Scaly-breasted munia","Lonchura punctulata","class","Other Aves",3
+"Sea eagle",NA,"family","Other Accipitridae",3
+"Seabird",NA,"class","Other Aves",3
+"Slender-billed gull","Chroicocephalus genei","family","Other Laridae",3
+"Surf scoter","Melanitta perspicillata","family","Other Anatidae",3
+"Tropical shearwater","Puffinus bailloni","class","Other Aves",3
+"Ural owl","Strix uralensis","class","Other Aves",3
+"Western sandpiper","Calidris mauri","order","Other Charadriiformes",3
+"Whiskered tern","Chlidonias hybrida","family","Other Laridae",3
+"African houbara","Chlamydotis undulata","class","Other Aves",2
+"African jacana","Actophilornis africanus","order","Other Charadriiformes",2
+"American wood stork","Mycteria americana","class","Other Aves",2
+"Audouin's gull","Ichthyaetus audouinii","family","Other Laridae",2
+"Black duck","Anas rubripes","genus","Other Anas",2
+"Black swift","Cypseloides niger","class","Other Aves",2
+"Black-faced spoonbill","Platalea minor","class","Other Aves",2
+"Black-headed goose",NA,"family","Other Anatidae",2
+"Blue crane","Anthropoides paradiseus","class","Other Aves",2
+"Bonaparte's gull","Chroicocephalus philadelphia","family","Other Laridae",2
+"Bulbul",NA,"class","Other Aves",2
+"Burrowing owl","Athene cunicularia","class","Other Aves",2
+"Calidris tenuirostris","Calidris tenuirostris","order","Other Charadriiformes",2
+"Canvasback","Aythya valisineria","family","Other Anatidae",2
+"Cattle milk product",NA,"class","Food products",2
+"Chilean dolphin","Cephalorhynchus eutropia","class","Other Mammalia",2
+"Chinstrap penguin","Pygoscelis antarcticus","class","Other Aves",2
+"Civet","Civettictis civetta","order","Carnivora",2
+"Common dolphin","Delphinus delphis","class","Other Mammalia",2
+"Common moorhen","Gallinula chloropus","class","Other Aves",2
+"Common wood pigeon","Columba palumbus","class","Other Aves",2
+"Crested caracara","Caracara plancus","class","Other Aves",2
+"Dolphin",NA,"class","Other Mammalia",2
+"Domestic ferret","Mustela putorius","order","Carnivora",2
+"Eider",NA,"family","Other Anatidae",2
+"Falcated duck","Mareca falcata","family","Other Anatidae",2
+"Ferruginous hawk","Buteo regalis","family","Other Accipitridae",2
+"Geoffroy's cat","Leopardus geoffroyi","order","Carnivora",2
+"Golden eagle","Aquila chrysaetos","family","Other Accipitridae",2
+"Green sandpiper","Tringa ochropus","order","Other Charadriiformes",2
+"Grey teal","Anas gracilis","genus","Other Anas",2
+"Grey-crowned crane","Balearica regulorum","class","Other Aves",2
+"Grey-headed gull","Chroicocephalus cirrocephalus","family","Other Laridae",2
+"Helmeted guineafowl","Numida meleagris","order","Other Galliformes",2
+"Hen harrier","Circus cyaneus","family","Other Accipitridae",2
+"Ibis",NA,"class","Other Aves",2
+"Irere","Dendrocygna viduata","family","Other Anatidae",2
+"King penguin","Aptenodytes patagonicus","class","Other Aves",2
+"Least sandpiper","Calidris minutilla","order","Other Charadriiformes",2
+"Leopard","Panthera pardus","order","Carnivora",2
+"Little owl","Athene noctua","class","Other Aves",2
+"Little tern","Sternula albifrons","family","Other Laridae",2
+"Macaque",NA,"class","Other Mammalia",2
+"Magnificent frigatebird","Fregata magnificens","class","Other Aves",2
+"Merlin","Falco columbarius","class","Other Aves",2
+"Mountain hawk-eagle","Nisaetus nipalensis","family","Other Accipitridae",2
+"North american opossum","Didelphis virginiana","class","Other Mammalia",2
+"Northern fur seal","Callorhinus ursinus","order","Carnivora",2
+"Northern harrier","Circus hudsonius","family","Other Accipitridae",2
+"Norway rat","Rattus norvegicus","class","Other Mammalia",2
+"Oriental magpie-robin","Copsychus saularis","class","Other Aves",2
+"Pet food",NA,"class","Food products",2
+"Red kite","Milvus milvus","family","Other Accipitridae",2
+"Ringed seal","Pusa hispida","order","Carnivora",2
+"Shelduck",NA,"family","Other Anatidae",2
+"Short-billed gull","Larus brachyrhynchus","genus","Larus",2
+"Short-eared owl","Asio flammeus","class","Other Aves",2
+"Smew","Mergellus albellus","family","Other Anatidae",2
+"Snowy egret","Egretta thula","class","Other Aves",2
+"Southern fulmar","Fulmarus glacialoides","class","Other Aves",2
+"Sparrow hawk","Accipiter nisus","family","Other Accipitridae",2
+"Spoonbill",NA,"class","Other Aves",2
+"Square-tailed nightjar","Caprimulgus fossii","class","Other Aves",2
+"Stone marten","Martes foina","order","Carnivora",2
+"Thayer's gull","Larus thayeri","genus","Larus",2
+"Thrush",NA,"class","Other Aves",2
+"Western cattle egret","Bubulcus ibis","class","Other Aves",2
+"Western screech owl","Megascops kennicottii","class","Other Aves",2
+"Whistling duck",NA,"family","Other Anatidae",2
+"White-backed munia","Lonchura striata","class","Other Aves",2
+"White-faced whistling-duck","Dendrocygna viduata","family","Other Anatidae",2
+"Whooping crane","Grus americana","class","Other Aves",2
+"Willet","Tringa semipalmata","order","Other Charadriiformes",2
+"African fish eagle","Haliaeetus vocifer","family","Other Accipitridae",1
+"American golden-plover","Pluvialis dominica","order","Other Charadriiformes",1
+"American woodcock","Scolopax minor","order","Other Charadriiformes",1
+"Anatinae",NA,"family","Other Anatidae",1
+"Antarctic shag","Leucocarbo bransfieldensis","class","Other Aves",1
+"Antarctic tern","Sterna vittata","family","Other Laridae",1
+"Arctic skua",NA,"class","Other Aves",1
+"Armenian gull","Larus armenicus","genus","Larus",1
+"Asian black bear","Ursus thibetanus","order","Carnivora",1
+"Atlantic white-sided dolphin","Leucopleurus acutus","class","Other Mammalia",1
+"Australian brushturkey","Alectura lathami","order","Other Galliformes",1
+"Australian pelican","Pelecanus conspicillatus","class","Other Aves",1
+"Babbler",NA,"class","Other Aves",1
+"Badger",NA,"order","Carnivora",1
+"Barrow's goldeneye","Bucephala islandica","family","Other Anatidae",1
+"Bewicks swan","Cygnus bewickii","genus","Other Cygnus",1
+"Black bulbul","Hypsipetes leucocephalus","class","Other Aves",1
+"Black turnstone","Arenaria melanocephala","order","Other Charadriiformes",1
+"Black-headed heron","Ardea melanocephala","class","Other Aves",1
+"Black-necked crane","Grus nigricollis","class","Other Aves",1
+"Blackish oystercatcher","Haematopus ater","order","Other Charadriiformes",1
+"Blakiston's fish owl","Bubo blakistoni","class","Other Aves",1
+"Booted eagle","Hieraaetus pennatus","family","Other Accipitridae",1
+"Brown-hooded gull","Chroicocephalus maculipennis","family","Other Laridae",1
+"Buff-necked ibis","Theristicus caudatus","class","Other Aves",1
+"Bush dog","Speothos venaticus","order","Carnivora",1
+"Cape gannet","Morus capensis","class","Other Aves",1
+"Cape teal","Anas capensis","genus","Other Anas",1
+"Chestnut munia","Lonchura atricapilla","class","Other Aves",1
+"Chestnut teal","Anas castanea","genus","Other Anas",1
+"Chiloe wigeon","Mareca sibilatrix","family","Other Anatidae",1
+"Chimango","Milvago chimango","class","Other Aves",1
+"Chinese pond heron","Ardeola bacchus","class","Other Aves",1
+"Collared plover","Anarhynchus collaris","order","Other Charadriiformes",1
+"Common hill myna","Gracula religiosa","class","Other Aves",1
+"Common kingfisher","Alcedo atthis","class","Other Aves",1
+"Common redshank","Tringa totanus","order","Other Charadriiformes",1
+"Common snipe","Gallinago gallinago","order","Other Charadriiformes",1
+"Coyote","Canis latrans","order","Carnivora",1
+"Cranes",NA,"class","Other Aves",1
+"Crested eagle","Morphnus guianensis","family","Other Accipitridae",1
+"Crested goshawk","Accipiter trivirgatus","family","Other Accipitridae",1
+"Crested jay","Platylophus galericulatus","class","Other Aves",1
+"Crested myna","Acridotheres cristatellus","class","Other Aves",1
+"Crowned cormorant","Microcarbo coronatus","class","Other Aves",1
+"Dark-eyed junco","Junco hyemalis","class","Other Aves",1
+"Daurian starling","Agropsar sturninus","class","Other Aves",1
+"Eastern screech owl","Megascops asio","class","Other Aves",1
+"Elegant tern","Thalasseus elegans","family","Other Laridae",1
+"Eurasian hobby","Falco subbuteo","class","Other Aves",1
+"Eurasian scops owl","Otus scops","class","Other Aves",1
+"Eurasian woodcock","Scolopax rusticola","order","Other Charadriiformes",1
+"European robin","Erithacus rubecula","class","Other Aves",1
+"European starling","Sturnus vulgaris","class","Other Aves",1
+"European turtle dove","Streptopelia turtur","class","Other Aves",1
+"Finch",NA,"class","Other Aves",1
+"Fisher","Pekania pennanti","order","Carnivora",1
+"Frigatebird",NA,"class","Other Aves",1
+"Fur seal","Arctocephalus australis","order","Carnivora",1
+"Furnarius rufus","Furnarius rufus","class","Other Aves",1
+"Golden pheasant","Chrysolophus pictus","order","Other Galliformes",1
+"Great black-hawk","Buteogallus urubitinga","family","Other Accipitridae",1
+"Great grey owl","Strix nebulosa","class","Other Aves",1
+"Great shearwater","Ardenna gravis","class","Other Aves",1
+"Great tit","Parus major","class","Other Aves",1
+"Greater rhea","Rhea americana","class","Other Aves",1
+"Greater yellowlegs","Tringa melanoleuca","order","Other Charadriiformes",1
+"Green heron","Butorides virescens","class","Other Aves",1
+"Green pheasant","Phasianus versicolor","order","Other Galliformes",1
+"Grey-faced buzzard","Butastur indicus","family","Other Accipitridae",1
+"Guinea",NA,"order","Other Galliformes",1
+"Gyr falcon","Falco rusticolus","class","Other Aves",1
+"Harbor porpoise","Phocoena phocoena","class","Other Mammalia",1
+"Hooded vulture","Necrosyrtes monachus","family","Other Accipitridae",1
+"Humboldt penguin","Spheniscus humboldti","class","Other Aves",1
+"Jack snipe","Lymnocryptes minimus","order","Other Charadriiformes",1
+"Jackal buzzard","Buteo rufofuscus","family","Other Accipitridae",1
+"Kalij pheasant","Lophura leucomelanos","order","Other Galliformes",1
+"King vulture","Sarcoramphus papa","class","Other Aves",1
+"Lady Amherst's pheasant","Chrysolophus amherstiae","order","Other Galliformes",1
+"Lapwing",NA,"order","Other Charadriiformes",1
+"Leopard cat","Prionailurus bengalensis","order","Carnivora",1
+"Lesser kestrel","Falco naumanni","class","Other Aves",1
+"Little auk","Alle alle","order","Other Charadriiformes",1
+"Long-tailed shrike","Lanius schach","class","Other Aves",1
+"Loon",NA,"class","Other Aves",1
+"Manx shearwater","Puffinus puffinus","class","Other Aves",1
+"Marabou stork","Leptoptilos crumenifer","class","Other Aves",1
+"Marine otter","Lontra felina","order","Carnivora",1
+"Meerkat","Suricata suricatta","order","Carnivora",1
+"Mexican duck","Anas diazi","genus","Other Anas",1
+"Moorhen",NA,"class","Other Aves",1
+"Mottled duck","Anas fulvigula","genus","Other Anas",1
+"Munia",NA,"class","Other Aves",1
+"Nene",NA,"family","Other Anatidae",1
+"Night heron",NA,"class","Other Aves",1
+"Northern giant petrel","Macronectes halli","class","Other Aves",1
+"Owston's civet","Chrotogale owstoni","order","Carnivora",1
+"Painted stork","Mycteria leucocephala","class","Other Aves",1
+"Pallas's sandgrouse","Syrrhaptes paradoxus","class","Other Aves",1
+"Pigeon guillemot","Cepphus columba","order","Other Charadriiformes",1
+"Pin-tailed snipe","Gallinago stenura","order","Other Charadriiformes",1
+"Pine marten","Martes martes","order","Carnivora",1
+"Pintado petrel","Daption capense","class","Other Aves",1
+"Plateau pika","Ochotona curzoniae","class","Other Mammalia",1
+"Polar bear","Ursus maritimus","order","Carnivora",1
+"Pomeranian goose",NA,"genus","Other Anser",1
+"Pond heron",NA,"class","Other Aves",1
+"Porpoise",NA,"class","Other Mammalia",1
+"Red-backed hawk","Geranoaetus polyosoma","family","Other Accipitridae",1
+"Red-billed blue magpie","Urocissa erythroryncha","class","Other Aves",1
+"Red-billed starling","Spodiopsar sericeus","class","Other Aves",1
+"Red-breasted goose","Branta ruficollis","family","Other Anatidae",1
+"Red-crested pochard","Netta rufina","family","Other Anatidae",1
+"Red-necked phalarope","Tringa tobata","order","Other Charadriiformes",1
+"Reed warbler",NA,"class","Other Aves",1
+"Ring-tailed hawk","Circus hudsonius","family","Other Accipitridae",1
+"Roseate spoonbill","Platalea ajaja","class","Other Aves",1
+"Rosy-billed pochard","Netta peposaca","family","Other Anatidae",1
+"Ruffed grouse","Bonasa umbellus","order","Other Galliformes",1
+"Saker falcon","Falco cherrug","class","Other Aves",1
+"Scarlet ibis","Eudocimus ruber","class","Other Aves",1
+"Scarlet macaw","Ara macao","class","Other Aves",1
+"Scoter",NA,"family","Other Anatidae",1
+"Shag","Phalacrocorax aristotelis","class","Other Aves",1
+"Shearwater",NA,"class","Other Aves",1
+"Short-tailed shearwater","Ardenna tenuirostris","class","Other Aves",1
+"Shrike",NA,"class","Other Aves",1
+"Siberian blue robin","Emberiza variabilis","class","Other Aves",1
+"Silver teal","Spatula versicolor","family","Other Anatidae",1
+"Silver-eared mesia","Leiothrix argentauris","class","Other Aves",1
+"Song thrush","Turdus philomelos","class","Other Aves",1
+"South Georgia shag","Leucocarbo georgianus","class","Other Aves",1
+"Spatula querquedula","Spatula querquedula","family","Other Anatidae",1
+"Speckled pigeon","Columba guinea","class","Other Aves",1
+"Spotted eagle owl","Bubo africanus","class","Other Aves",1
+"Starling","Sturnus vulgaris","class","Other Aves",1
+"Steamer duck",NA,"family","Other Anatidae",1
+"Stone curlew",NA,"order","Other Charadriiformes",1
+"Swiftlet",NA,"class","Other Aves",1
+"Tibetan blue bear","Ursus arctos","order","Carnivora",1
+"Tropical screech owl","Megascops choliba","class","Other Aves",1
+"Tundra bean goose","Anser serrirostris","genus","Other Anser",1
+"Velvet scoter","Melanitta fusca","family","Other Anatidae",1
+"Von schrenck's bittern","Ixobrychus eurhythmus","class","Other Aves",1
+"Watercock","Gallicrex cinerea","class","Other Aves",1
+"White-backed stilt","Himantopus himantopus","order","Other Charadriiformes",1
+"White-breasted cormorant","Phalacrocorax lucidus","class","Other Aves",1
+"White-faced ibis","Plegadis chihi","class","Other Aves",1
+"White-winged black tern","Chlidonias leucopterus","family","Other Laridae",1
+"White-winged dove","Zenaida asiatica","class","Other Aves",1
+"Yellow-billed duck","Anas undulata","genus","Other Anas",1
+"Yellow-billed pintail","Anas georgica","genus","Other Anas",1
+"Yellow-billed teal","Anas flavirostris","genus","Other Anas",1
+"Yellow-headed amazon","Amazona oratrix","class","Other Aves",1
