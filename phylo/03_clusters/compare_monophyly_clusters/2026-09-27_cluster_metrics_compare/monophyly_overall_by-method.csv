@@ -1,0 +1,5 @@
+method,n_clusters,n_monophyletic,prop_monophyletic
+treecluster,4770,4770,1
+genin,67,33,0.4925373134328358
+cdhit,3730,1657,0.44423592493297587
+genoflu,141,20,0.14184397163120568

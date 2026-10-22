@@ -1,0 +1,219 @@
+segment,method,metric,value,is_zero
+PB2,genoflu,N clusters,34,FALSE
+PB2,genoflu,Median cluster size,131.5,FALSE
+PB2,genoflu,Maximum cluster size,8629,FALSE
+PB2,genoflu,Median purity,0.3371810368542585,FALSE
+PB2,genoflu,Proportion clusters monophyletic,0.2647058823529412,FALSE
+PB2,genoflu,Median Faith's PD [size >11] (s/s),0.7221899826,FALSE
+PB2,genoflu,N singletons,1,FALSE
+PB1,genoflu,N clusters,29,FALSE
+PB1,genoflu,Median cluster size,97,FALSE
+PB1,genoflu,Maximum cluster size,11450,FALSE
+PB1,genoflu,Median purity,0.0409418237721499,FALSE
+PB1,genoflu,Proportion clusters monophyletic,0.20689655172413793,FALSE
+PB1,genoflu,Median Faith's PD [size >11] (s/s),0.47857149525,FALSE
+PB1,genoflu,N singletons,0,TRUE
+PA,genoflu,N clusters,15,FALSE
+PA,genoflu,Median cluster size,562,FALSE
+PA,genoflu,Maximum cluster size,15995,FALSE
+PA,genoflu,Median purity,0.0934520025429116,FALSE
+PA,genoflu,Proportion clusters monophyletic,0.06666666666666667,FALSE
+PA,genoflu,Median Faith's PD [size >11] (s/s),1.1151299562,FALSE
+PA,genoflu,N singletons,0,TRUE
+HA,genoflu,N clusters,6,FALSE
+HA,genoflu,Median cluster size,1774,FALSE
+HA,genoflu,Maximum cluster size,21707,FALSE
+HA,genoflu,Median purity,0.0437700468788552,FALSE
+HA,genoflu,Proportion clusters monophyletic,0,TRUE
+HA,genoflu,Median Faith's PD [size >11] (s/s),3.8646787078150853,FALSE
+HA,genoflu,N singletons,0,TRUE
+NP,genoflu,N clusters,25,FALSE
+NP,genoflu,Median cluster size,356,FALSE
+NP,genoflu,Maximum cluster size,14166,FALSE
+NP,genoflu,Median purity,0.0905043025815489,FALSE
+NP,genoflu,Proportion clusters monophyletic,0.16,FALSE
+NP,genoflu,Median Faith's PD [size >11] (s/s),0.7933995132999915,FALSE
+NP,genoflu,N singletons,0,TRUE
+NA,genoflu,N clusters,15,FALSE
+NA,genoflu,Median cluster size,1294,FALSE
+NA,genoflu,Maximum cluster size,13976,FALSE
+NA,genoflu,Median purity,0.09059955588453,FALSE
+NA,genoflu,Proportion clusters monophyletic,0,TRUE
+NA,genoflu,Median Faith's PD [size >11] (s/s),6.04908740180067,FALSE
+NA,genoflu,N singletons,0,TRUE
+M,genoflu,N clusters,6,FALSE
+M,genoflu,Median cluster size,6119.5,FALSE
+M,genoflu,Maximum cluster size,15081,FALSE
+M,genoflu,Median purity,0.2888761540309685,FALSE
+M,genoflu,Proportion clusters monophyletic,0,TRUE
+M,genoflu,Median Faith's PD [size >11] (s/s),4.711145742749419,FALSE
+M,genoflu,N singletons,0,TRUE
+NS,genoflu,N clusters,11,FALSE
+NS,genoflu,Median cluster size,848,FALSE
+NS,genoflu,Maximum cluster size,12854,FALSE
+NS,genoflu,Median purity,0.0432801822323462,FALSE
+NS,genoflu,Proportion clusters monophyletic,0,TRUE
+NS,genoflu,Median Faith's PD [size >11] (s/s),2.68893473089995,FALSE
+NS,genoflu,N singletons,0,TRUE
+PB2,genin,N clusters,14,FALSE
+PB2,genin,Median cluster size,399,FALSE
+PB2,genin,Maximum cluster size,4176,FALSE
+PB2,genin,Median purity,0.9895723728584915,FALSE
+PB2,genin,Proportion clusters monophyletic,0.2857142857142857,FALSE
+PB2,genin,Median Faith's PD [size >11] (s/s),0.982316058199996,FALSE
+PB2,genin,N singletons,0,TRUE
+PB1,genin,N clusters,12,FALSE
+PB1,genin,Median cluster size,406,FALSE
+PB1,genin,Maximum cluster size,13813,FALSE
+PB1,genin,Median purity,0.5663431561266226,FALSE
+PB1,genin,Proportion clusters monophyletic,0.25,FALSE
+PB1,genin,Median Faith's PD [size >11] (s/s),0.889821973499984,FALSE
+PB1,genin,N singletons,0,TRUE
+PA,genin,N clusters,10,FALSE
+PA,genin,Median cluster size,290.5,FALSE
+PA,genin,Maximum cluster size,16323,FALSE
+PA,genin,Median purity,1,FALSE
+PA,genin,Proportion clusters monophyletic,0.7,FALSE
+PA,genin,Median Faith's PD [size >11] (s/s),0.474631704350001,FALSE
+PA,genin,N singletons,0,TRUE
+HA,genin,N clusters,1,FALSE
+HA,genin,Median cluster size,41366,FALSE
+HA,genin,Maximum cluster size,41366,FALSE
+HA,genin,N singletons,0,TRUE
+NP,genin,N clusters,15,FALSE
+NP,genin,Median cluster size,270,FALSE
+NP,genin,Maximum cluster size,3920,FALSE
+NP,genin,Median purity,1,FALSE
+NP,genin,Proportion clusters monophyletic,0.8,FALSE
+NP,genin,Median Faith's PD [size >11] (s/s),0.511592636799994,FALSE
+NP,genin,N singletons,0,TRUE
+NA,genin,N clusters,6,FALSE
+NA,genin,Median cluster size,296.5,FALSE
+NA,genin,Maximum cluster size,32295,FALSE
+NA,genin,Median purity,1,FALSE
+NA,genin,Proportion clusters monophyletic,0.8333333333333334,FALSE
+NA,genin,Median Faith's PD [size >11] (s/s),1.457073054,FALSE
+NA,genin,N singletons,0,TRUE
+M,genin,N clusters,1,FALSE
+M,genin,Median cluster size,31965,FALSE
+M,genin,Maximum cluster size,31965,FALSE
+M,genin,N singletons,0,TRUE
+NS,genin,N clusters,8,FALSE
+NS,genin,Median cluster size,2141,FALSE
+NS,genin,Maximum cluster size,27175,FALSE
+NS,genin,Median purity,0.408983800395402,FALSE
+NS,genin,Proportion clusters monophyletic,0,TRUE
+NS,genin,Median Faith's PD [size >11] (s/s),2.440765138999975,FALSE
+NS,genin,N singletons,0,TRUE
+PB2,cdhit,N clusters,536,FALSE
+PB2,cdhit,Median cluster size,6,FALSE
+PB2,cdhit,Maximum cluster size,4958,FALSE
+PB2,cdhit,Median purity,1,FALSE
+PB2,cdhit,Proportion clusters monophyletic,0.5130597014925373,FALSE
+PB2,cdhit,Median Faith's PD [size >11] (s/s),0.09107499999999999,FALSE
+PB2,cdhit,N singletons,437,FALSE
+PB1,cdhit,N clusters,568,FALSE
+PB1,cdhit,Median cluster size,5,FALSE
+PB1,cdhit,Maximum cluster size,5893,FALSE
+PB1,cdhit,Median purity,0.949476650563607,FALSE
+PB1,cdhit,Proportion clusters monophyletic,0.45422535211267606,FALSE
+PB1,cdhit,Median Faith's PD [size >11] (s/s),0.08652,FALSE
+PB1,cdhit,N singletons,499,FALSE
+PA,cdhit,N clusters,484,FALSE
+PA,cdhit,Median cluster size,6.5,FALSE
+PA,cdhit,Maximum cluster size,7523,FALSE
+PA,cdhit,Median purity,0.9464461690071445,FALSE
+PA,cdhit,Proportion clusters monophyletic,0.46487603305785125,FALSE
+PA,cdhit,Median Faith's PD [size >11] (s/s),0.09062,FALSE
+PA,cdhit,N singletons,366,FALSE
+HA,cdhit,N clusters,460,FALSE
+HA,cdhit,Median cluster size,7,FALSE
+HA,cdhit,Maximum cluster size,7030,FALSE
+HA,cdhit,Median purity,0.791304347826087,FALSE
+HA,cdhit,Proportion clusters monophyletic,0.4043478260869565,FALSE
+HA,cdhit,Median Faith's PD [size >11] (s/s),0.0928699999999999,FALSE
+HA,cdhit,N singletons,214,FALSE
+NP,cdhit,N clusters,434,FALSE
+NP,cdhit,Median cluster size,8,FALSE
+NP,cdhit,Maximum cluster size,4995,FALSE
+NP,cdhit,Median purity,0.957994646563968,FALSE
+NP,cdhit,Proportion clusters monophyletic,0.4608294930875576,FALSE
+NP,cdhit,Median Faith's PD [size >11] (s/s),0.08559499999999995,FALSE
+NP,cdhit,N singletons,245,FALSE
+NA,cdhit,N clusters,558,FALSE
+NA,cdhit,Median cluster size,6,FALSE
+NA,cdhit,Maximum cluster size,6973,FALSE
+NA,cdhit,Median purity,0.916666666666667,FALSE
+NA,cdhit,Proportion clusters monophyletic,0.45340501792114696,FALSE
+NA,cdhit,Median Faith's PD [size >11] (s/s),0.09811999999999996,FALSE
+NA,cdhit,N singletons,311,FALSE
+M,cdhit,N clusters,252,FALSE
+M,cdhit,Median cluster size,8,FALSE
+M,cdhit,Maximum cluster size,7146,FALSE
+M,cdhit,Median purity,0.6708333333333335,FALSE
+M,cdhit,Proportion clusters monophyletic,0.3531746031746032,FALSE
+M,cdhit,Median Faith's PD [size >11] (s/s),0.1218,FALSE
+M,cdhit,N singletons,137,FALSE
+NS,cdhit,N clusters,438,FALSE
+NS,cdhit,Median cluster size,9,FALSE
+NS,cdhit,Maximum cluster size,7692,FALSE
+NS,cdhit,Median purity,0.818181818181818,FALSE
+NS,cdhit,Proportion clusters monophyletic,0.3904109589041096,FALSE
+NS,cdhit,Median Faith's PD [size >11] (s/s),0.1122,FALSE
+NS,cdhit,N singletons,210,FALSE
+PB2,treecluster,N clusters,672,FALSE
+PB2,treecluster,Median cluster size,6,FALSE
+PB2,treecluster,Maximum cluster size,6355,FALSE
+PB2,treecluster,Median purity,1,FALSE
+PB2,treecluster,Proportion clusters monophyletic,1,FALSE
+PB2,treecluster,Median Faith's PD [size >11] (s/s),0.069285079,FALSE
+PB2,treecluster,N singletons,293,FALSE
+PB1,treecluster,N clusters,673,FALSE
+PB1,treecluster,Median cluster size,6,FALSE
+PB1,treecluster,Maximum cluster size,4970,FALSE
+PB1,treecluster,Median purity,1,FALSE
+PB1,treecluster,Proportion clusters monophyletic,1,FALSE
+PB1,treecluster,Median Faith's PD [size >11] (s/s),0.0682387301,FALSE
+PB1,treecluster,N singletons,304,FALSE
+PA,treecluster,N clusters,662,FALSE
+PA,treecluster,Median cluster size,7,FALSE
+PA,treecluster,Maximum cluster size,3941,FALSE
+PA,treecluster,Median purity,1,FALSE
+PA,treecluster,Proportion clusters monophyletic,1,FALSE
+PA,treecluster,Median Faith's PD [size >11] (s/s),0.0760725342,FALSE
+PA,treecluster,N singletons,269,FALSE
+HA,treecluster,N clusters,580,FALSE
+HA,treecluster,Median cluster size,7,FALSE
+HA,treecluster,Maximum cluster size,6252,FALSE
+HA,treecluster,Median purity,1,FALSE
+HA,treecluster,Proportion clusters monophyletic,1,FALSE
+HA,treecluster,Median Faith's PD [size >11] (s/s),0.0710260811,FALSE
+HA,treecluster,N singletons,256,FALSE
+NP,treecluster,N clusters,484,FALSE
+NP,treecluster,Median cluster size,8,FALSE
+NP,treecluster,Maximum cluster size,5059,FALSE
+NP,treecluster,Median purity,1,FALSE
+NP,treecluster,Proportion clusters monophyletic,1,FALSE
+NP,treecluster,Median Faith's PD [size >11] (s/s),0.06978341835,FALSE
+NP,treecluster,N singletons,193,FALSE
+NA,treecluster,N clusters,708,FALSE
+NA,treecluster,Median cluster size,5,FALSE
+NA,treecluster,Maximum cluster size,6218,FALSE
+NA,treecluster,Median purity,1,FALSE
+NA,treecluster,Proportion clusters monophyletic,1,FALSE
+NA,treecluster,Median Faith's PD [size >11] (s/s),0.07075404935,FALSE
+NA,treecluster,N singletons,344,FALSE
+M,treecluster,N clusters,399,FALSE
+M,treecluster,Median cluster size,10,FALSE
+M,treecluster,Maximum cluster size,5013,FALSE
+M,treecluster,Median purity,1,FALSE
+M,treecluster,Proportion clusters monophyletic,1,FALSE
+M,treecluster,Median Faith's PD [size >11] (s/s),0.06664118934999995,FALSE
+M,treecluster,N singletons,131,FALSE
+NS,treecluster,N clusters,592,FALSE
+NS,treecluster,Median cluster size,7,FALSE
+NS,treecluster,Maximum cluster size,6233,FALSE
+NS,treecluster,Median purity,1,FALSE
+NS,treecluster,Proportion clusters monophyletic,1,FALSE
+NS,treecluster,Median Faith's PD [size >11] (s/s),0.06744220525,FALSE
+NS,treecluster,N singletons,216,FALSE
