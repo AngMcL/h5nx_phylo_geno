@@ -1,0 +1,30 @@
+taxa2,host_group,color_hex
+Chicken,Poultry / galliforms,#C65A3A
+Mallard,Waterfowl / Anatidae,#167C80
+Cattle,Mammals,#5E8C61
+Other Aves,Other birds,#7F96AE
+Other Anatidae,Waterfowl / Anatidae,#3E9A97
+Turkey,Poultry / galliforms,#E08A52
+Other Anser,Waterfowl / Anatidae,#76B7A6
+Larus,Gulls / shorebirds,#7E8F4E
+Canada goose,Waterfowl / Anatidae,#2F8A6E
+Carnivora,Mammals,#8A7860
+Environment,Other sample types,#7C8A8B
+Corvus,Other birds,#4E6C88
+Snow goose,Waterfowl / Anatidae,#A5C98B
+Mute swan,Waterfowl / Anatidae,#6FBCC3
+Other Cygnus,Waterfowl / Anatidae,#A8D6D9
+Other Accipitridae,Raptors / scavengers / owls,#6E4C7C
+Red-tailed hawk,Raptors / scavengers / owls,#8A5A7E
+Black-headed gull,Gulls / shorebirds,#A5B75A
+Other Laridae,Gulls / shorebirds,#C6C46D
+Other Anas,Waterfowl / Anatidae,#4F87B8
+Bald eagle,Raptors / scavengers / owls,#A87496
+Other Galliformes,Poultry / galliforms,#F1B37A
+Black vulture,Raptors / scavengers / owls,#5C506B
+Great horned owl,Raptors / scavengers / owls,#8C78A8
+Human,Mammals,#B29A74
+Other Charadriiformes,Gulls / shorebirds,#D9C98E
+Other Mammalia,Mammals,#97A57B
+Food products,Other sample types,#B08A63
+Insecta,Other sample types,#B89C34
