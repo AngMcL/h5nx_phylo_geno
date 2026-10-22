@@ -1,0 +1,542 @@
+"common","species","has_species"
+"African fish eagle","Haliaeetus vocifer",TRUE
+"African houbara","Chlamydotis undulata",TRUE
+"African jacana","Actophilornis africanus",TRUE
+"African oystercatcher","Haematopus moquini",TRUE
+"African penguin","Spheniscus demersus",TRUE
+"Alpaca","Vicugna pacos",TRUE
+"American black duck","Anas rubripes",TRUE
+"American coot","Fulica americana",TRUE
+"American crow","Corvus brachyrhynchos",TRUE
+"American golden-plover","Pluvialis dominica",TRUE
+"American goshawk","Astur atricapillus",TRUE
+"American kestrel","Falco sparverius",TRUE
+"American robin","Turdus migratorius",TRUE
+"American white pelican","Pelecanus erythrorhynchos",TRUE
+"American wigeon","Mareca americana",TRUE
+"American wood stork","Mycteria americana",TRUE
+"American woodcock","Scolopax minor",TRUE
+"Anatinae",NA,FALSE
+"Ancient murrelet","Synthliboramphus antiquus",TRUE
+"Antarctic fur seal","Arctocephalus gazella",TRUE
+"Antarctic shag","Leucocarbo bransfieldensis",TRUE
+"Antarctic tern","Sterna vittata",TRUE
+"Arctic fox","Vulpes lagopus",TRUE
+"Arctic skua",NA,FALSE
+"Arctic tern","Sterna paradisaea",TRUE
+"Armenian gull","Larus armenicus",TRUE
+"Asian black bear","Ursus thibetanus",TRUE
+"Asian openbill","Anastomus oscitans",TRUE
+"Atlantic puffin","Fratercula arctica",TRUE
+"Atlantic white-sided dolphin","Leucopleurus acutus",TRUE
+"Audouin's gull","Ichthyaetus audouinii",TRUE
+"Australian brushturkey","Alectura lathami",TRUE
+"Australian pelican","Pelecanus conspicillatus",TRUE
+"Babbler",NA,FALSE
+"Badger",NA,FALSE
+"Baikal teal","Sibirionetta formosa",TRUE
+"Bald eagle","Haliaeetus leucocephalus",TRUE
+"Band-tailed gull","Larus belcheri",TRUE
+"Bar-headed goose","Anser indicus",TRUE
+"Barn swallow","Hirundo rustica",TRUE
+"Barnacle goose","Branta leucopsis",TRUE
+"Barred owl","Strix varia",TRUE
+"Barrow's goldeneye","Bucephala islandica",TRUE
+"Bean goose","Anser fabalis",TRUE
+"Bear",NA,FALSE
+"Bearded vulture","Gypaetus barbatus",TRUE
+"Bewicks swan","Cygnus bewickii",TRUE
+"Black bear","Ursus americanus",TRUE
+"Black bulbul","Hypsipetes leucocephalus",TRUE
+"Black kite","Milvus migrans",TRUE
+"Black scoter","Melanitta americana",TRUE
+"Black skimmer","Rynchops niger",TRUE
+"Black swan","Cygnus atratus",TRUE
+"Black swift","Cypseloides niger",TRUE
+"Black turnstone","Arenaria melanocephala",TRUE
+"Black vulture","Coragyps atratus",TRUE
+"Black-billed magpie","Pica hudsonia",TRUE
+"Black-crowned night heron","Nycticorax nycticorax",TRUE
+"Black-faced spoonbill","Platalea minor",TRUE
+"Black-headed goose",NA,FALSE
+"Black-headed gull","Chroicocephalus ridibundus",TRUE
+"Black-headed heron","Ardea melanocephala",TRUE
+"Black-legged kittiwake","Rissa tridactyla",TRUE
+"Black-necked crane","Grus nigricollis",TRUE
+"Black-necked swan","Cygnus melancoryphus",TRUE
+"Black-tailed gull","Larus crassirostris",TRUE
+"Blackish oystercatcher","Haematopus ater",TRUE
+"Blakiston's fish owl","Bubo blakistoni",TRUE
+"Blowfly",NA,FALSE
+"Blue crane","Anthropoides paradiseus",TRUE
+"Blue jay","Cyanocitta cristata",TRUE
+"Blue-winged teal","Spatula discors",TRUE
+"Bobcat","Lynx rufus",TRUE
+"Bonaparte's gull","Chroicocephalus philadelphia",TRUE
+"Booted eagle","Hieraaetus pennatus",TRUE
+"Bottlenose dolphin",NA,FALSE
+"Brant goose","Branta bernicla",TRUE
+"Broad-winged hawk","Buteo platypterus",TRUE
+"Brown booby","Sula leucogaster",TRUE
+"Brown pelican","Pelecanus occidentalis",TRUE
+"Brown skua","Stercorarius lonnbergi",TRUE
+"Brown-headed gull","Chroicocephalus brunnicephalus",TRUE
+"Brown-hooded gull","Chroicocephalus maculipennis",TRUE
+"Buff-necked ibis","Theristicus caudatus",TRUE
+"Bufflehead","Bucephala albeola",TRUE
+"Bulbul",NA,FALSE
+"Burmeister's porpoise","Phocoena spinipinnis",TRUE
+"Burrowing owl","Athene cunicularia",TRUE
+"Bush dog","Speothos venaticus",TRUE
+"Cackling goose","Branta hutchinsii",TRUE
+"California condor","Gymnogyps californianus",TRUE
+"California gull","Larus californicus",TRUE
+"Canada goose","Branta canadensis",TRUE
+"Canvasback","Aythya valisineria",TRUE
+"Cape cormorant","Phalacrocorax capensis",TRUE
+"Cape gannet","Morus capensis",TRUE
+"Cape teal","Anas capensis",TRUE
+"Carrion crow","Corvus corone",TRUE
+"Caspian gull","Larus cachinnans",TRUE
+"Caspian tern","Hydroprogne caspia",TRUE
+"Cat","Felis catus",TRUE
+"Cattle","Bos taurus",TRUE
+"Cattle milk product",NA,FALSE
+"Chestnut munia","Lonchura atricapilla",TRUE
+"Chestnut teal","Anas castanea",TRUE
+"Chicken","Gallus gallus",TRUE
+"Chilean dolphin","Cephalorhynchus eutropia",TRUE
+"Chiloe wigeon","Mareca sibilatrix",TRUE
+"Chimango","Milvago chimango",TRUE
+"Chinese pond heron","Ardeola bacchus",TRUE
+"Chinstrap penguin","Pygoscelis antarcticus",TRUE
+"Chukar","Alectoris chukar",TRUE
+"Cinnamon teal","Spatula cyanoptera",TRUE
+"Civet","Civettictis civetta",TRUE
+"Collared plover","Anarhynchus collaris",TRUE
+"Common blackbird","Turdus merula",TRUE
+"Common buzzard","Buteo buteo",TRUE
+"Common crane","Grus grus",TRUE
+"Common dolphin","Delphinus delphis",TRUE
+"Common eider","Somateria mollissima",TRUE
+"Common goldeneye","Bucephala clangula",TRUE
+"Common grackle","Quiscalus quiscula",TRUE
+"Common gull","Larus canus",TRUE
+"Common hill myna","Gracula religiosa",TRUE
+"Common kestrel","Falco tinnunculus",TRUE
+"Common kingfisher","Alcedo atthis",TRUE
+"Common loon","Gavia immer",TRUE
+"Common magpie","Pica pica",TRUE
+"Common merganser","Mergus merganser",TRUE
+"Common moorhen","Gallinula chloropus",TRUE
+"Common murre","Uria aalge",TRUE
+"Common pheasant","Phasianus colchicus",TRUE
+"Common pochard","Aythya ferina",TRUE
+"Common quail","Coturnix coturnix",TRUE
+"Common raven","Corvus corax",TRUE
+"Common redshank","Tringa totanus",TRUE
+"Common shelduck","Tadorna tadorna",TRUE
+"Common snipe","Gallinago gallinago",TRUE
+"Common teal","Anas crecca",TRUE
+"Common tern","Sterna hirundo",TRUE
+"Common wood pigeon","Columba palumbus",TRUE
+"Cooper's hawk","Accipiter cooperii",TRUE
+"Coot",NA,FALSE
+"Cormorant",NA,FALSE
+"Coscoroba swan","Coscoroba coscoroba",TRUE
+"Coyote","Canis latrans",TRUE
+"Cranes",NA,FALSE
+"Crested auklet","Aethia cristatella",TRUE
+"Crested caracara","Caracara plancus",TRUE
+"Crested eagle","Morphnus guianensis",TRUE
+"Crested goshawk","Accipiter trivirgatus",TRUE
+"Crested jay","Platylophus galericulatus",TRUE
+"Crested myna","Acridotheres cristatellus",TRUE
+"Crow",NA,FALSE
+"Crowned cormorant","Microcarbo coronatus",TRUE
+"Curlew",NA,FALSE
+"Dalmatian pelican","Pelecanus crispus",TRUE
+"Dark-eyed junco","Junco hyemalis",TRUE
+"Daurian starling","Agropsar sturninus",TRUE
+"Dog","Canis lupus",TRUE
+"Dolphin",NA,FALSE
+"Double-crested cormorant","Phalacrocorax auritus",TRUE
+"Dove",NA,FALSE
+"Duck",NA,FALSE
+"Dunlin","Calidris alpina",TRUE
+"Eagle",NA,FALSE
+"Eared grebe","Podiceps nigricollis",TRUE
+"Eastern buzzard","Buteo japonicus",TRUE
+"Eastern screech owl","Megascops asio",TRUE
+"Egret","Ardea alba",TRUE
+"Egyptian goose","Alopochen aegyptiaca",TRUE
+"Eider",NA,FALSE
+"Elegant tern","Thalasseus elegans",TRUE
+"Emperor goose","Anser canagicus",TRUE
+"Emu","Dromaius novaehollandiae",TRUE
+"Environment",NA,FALSE
+"Eurasian collared dove","Streptopelia decaocto",TRUE
+"Eurasian coot","Fulica atra",TRUE
+"Eurasian curlew","Numenius arquata",TRUE
+"Eurasian eagle-owl","Bubo bubo",TRUE
+"Eurasian griffon vulture","Gyps fulvus",TRUE
+"Eurasian hobby","Falco subbuteo",TRUE
+"Eurasian jay","Garrulus glandarius",TRUE
+"Eurasian oystercatcher","Haematopus ostralegus",TRUE
+"Eurasian scops owl","Otus scops",TRUE
+"Eurasian sparrowhawk","Accipiter nisus",TRUE
+"Eurasian spoonbill","Platalea leucorodia",TRUE
+"Eurasian wigeon","Mareca penelope",TRUE
+"Eurasian woodcock","Scolopax rusticola",TRUE
+"European polecat","Mustela putorius",TRUE
+"European robin","Erithacus rubecula",TRUE
+"European starling","Sturnus vulgaris",TRUE
+"European turtle dove","Streptopelia turtur",TRUE
+"Falcated duck","Mareca falcata",TRUE
+"Falcon",NA,FALSE
+"Ferret","Mustela furo",TRUE
+"Ferruginous hawk","Buteo regalis",TRUE
+"Finch",NA,FALSE
+"Fish crow","Corvus ossifragus",TRUE
+"Fisher","Pekania pennanti",TRUE
+"Fox",NA,FALSE
+"Franklin's gull","Leucophaeus pipixcan",TRUE
+"Frigatebird",NA,FALSE
+"Fulmar",NA,FALSE
+"Fur seal","Arctocephalus australis",TRUE
+"Gadwall","Mareca strepera",TRUE
+"Gannet",NA,FALSE
+"Garganey","Spatula querquedula",TRUE
+"Geoffroy's cat","Leopardus geoffroyi",TRUE
+"Glaucous gull","Larus hyperboreus",TRUE
+"Glaucous-winged gull","Larus glaucescens",TRUE
+"Goat","Capra hircus",TRUE
+"Golden eagle","Aquila chrysaetos",TRUE
+"Golden pheasant","Chrysolophus pictus",TRUE
+"Goose",NA,FALSE
+"Grackle",NA,FALSE
+"Great black-backed gull","Larus marinus",TRUE
+"Great black-hawk","Buteogallus urubitinga",TRUE
+"Great black-headed gull","Ichthyaetus ichthyaetus",TRUE
+"Great blue heron","Ardea herodias",TRUE
+"Great cormorant","Phalacrocorax carbo",TRUE
+"Great crested grebe","Podiceps cristatus",TRUE
+"Great grey owl","Strix nebulosa",TRUE
+"Great horned owl","Bubo virginianus",TRUE
+"Great knot","Calidris tenuirostris",TRUE
+"Great shearwater","Ardenna gravis",TRUE
+"Great skua","Stercorarius skua",TRUE
+"Great tit","Parus major",TRUE
+"Great white pelican","Pelecanus onocrotalus",TRUE
+"Great-tailed grackle","Quiscalus mexicanus",TRUE
+"Greater flamingo","Phoenicopterus roseus",TRUE
+"Greater rhea","Rhea americana",TRUE
+"Greater scaup","Aythya marila",TRUE
+"Greater yellowlegs","Tringa melanoleuca",TRUE
+"Grebe",NA,FALSE
+"Green heron","Butorides virescens",TRUE
+"Green pheasant","Phasianus versicolor",TRUE
+"Green sandpiper","Tringa ochropus",TRUE
+"Green-winged teal","Anas carolinensis",TRUE
+"Grey goose",NA,FALSE
+"Grey gull","Leucophaeus modestus",TRUE
+"Grey heron","Ardea cinerea",TRUE
+"Grey seal","Halichoerus grypus",TRUE
+"Grey teal","Anas gracilis",TRUE
+"Grey-crowned crane","Balearica regulorum",TRUE
+"Grey-faced buzzard","Butastur indicus",TRUE
+"Grey-headed gull","Chroicocephalus cirrocephalus",TRUE
+"Greylag goose","Anser anser",TRUE
+"Guanay cormorant","Leucocarbo bougainvillii",TRUE
+"Guinea",NA,FALSE
+"Guineafowl",NA,FALSE
+"Gull",NA,FALSE
+"Gull-billed tern","Gelochelidon nilotica",TRUE
+"Gyrfalcon","Falco rusticolus",TRUE
+"Harbor porpoise","Phocoena phocoena",TRUE
+"Harbor seal","Phoca vitulina",TRUE
+"Harris's hawk","Parabuteo unicinctus",TRUE
+"Hartlaub's gull","Chroicocephalus hartlaubii",TRUE
+"Hawaiian goose",NA,FALSE
+"Hawk",NA,FALSE
+"Helmeted guineafowl","Numida meleagris",TRUE
+"Hen harrier","Circus cyaneus",TRUE
+"Herons",NA,FALSE
+"Herring gull","Larus argentatus",TRUE
+"Hooded crane","Grus monacha",TRUE
+"Hooded merganser","Lophodytes cucullatus",TRUE
+"Hooded vulture","Necrosyrtes monachus",TRUE
+"Horned grebe","Podiceps auritus",TRUE
+"Horse","Equus caballus",TRUE
+"Human","Homo sapiens",TRUE
+"Humboldt penguin","Spheniscus humboldti",TRUE
+"Ibis",NA,FALSE
+"Iceland gull","Larus glaucoides",TRUE
+"Inca tern","Larosterna inca",TRUE
+"Indian peafowl","Pavo cristatus",TRUE
+"Jack snipe","Lymnocryptes minimus",TRUE
+"Jackal buzzard","Buteo rufofuscus",TRUE
+"Jackdaw","Coloeus monedula",TRUE
+"Japanese white-eye","Zosterops japonicus",TRUE
+"Kalij pheasant","Lophura leucomelanos",TRUE
+"Kelp gull","Larus dominicanus",TRUE
+"King penguin","Aptenodytes patagonicus",TRUE
+"King vulture","Sarcoramphus papa",TRUE
+"Kittiwake",NA,FALSE
+"Lady Amherst's pheasant","Chrysolophus amherstiae",TRUE
+"Lapwing",NA,FALSE
+"Large-billed crow","Corvus macrorhynchos",TRUE
+"Laughing gull","Leucophaeus atricilla",TRUE
+"Least sandpiper","Calidris minutilla",TRUE
+"Leopard","Panthera pardus",TRUE
+"Leopard cat","Prionailurus bengalensis",TRUE
+"Lesser black-backed gull","Larus fuscus",TRUE
+"Lesser kestrel","Falco naumanni",TRUE
+"Lesser scaup","Aythya affinis",TRUE
+"Lesser white-fronted goose","Anser erythropus",TRUE
+"Lion","Panthera leo",TRUE
+"Little auk","Alle alle",TRUE
+"Little egret","Egretta garzetta",TRUE
+"Little grebe","Tachybaptus ruficollis",TRUE
+"Little gull","Hydrocoloeus minutus",TRUE
+"Little owl","Athene noctua",TRUE
+"Little tern","Sternula albifrons",TRUE
+"Long-eared owl","Asio otus",TRUE
+"Long-tailed shrike","Lanius schach",TRUE
+"Loon",NA,FALSE
+"Lynx",NA,FALSE
+"Macaque",NA,FALSE
+"Magnificent frigatebird","Fregata magnificens",TRUE
+"Magpie",NA,FALSE
+"Magpie robin",NA,FALSE
+"Mallard","Anas platyrhynchos",TRUE
+"Mandarin duck","Aix galericulata",TRUE
+"Manx shearwater","Puffinus puffinus",TRUE
+"Marabou stork","Leptoptilos crumenifer",TRUE
+"Marine otter","Lontra felina",TRUE
+"Mediterranean gull","Ichthyaetus melanocephalus",TRUE
+"Meerkat","Suricata suricatta",TRUE
+"Merganser",NA,FALSE
+"Merlin","Falco columbarius",TRUE
+"Mexican duck","Anas diazi",TRUE
+"Mink","Neogale vison",TRUE
+"Moorhen",NA,FALSE
+"Mottled duck","Anas fulvigula",TRUE
+"Mountain hawk-eagle","Nisaetus nipalensis",TRUE
+"Mountain lion","Puma concolor",TRUE
+"Mouse","Mus musculus",TRUE
+"Munia",NA,FALSE
+"Muscovy duck","Cairina moschata",TRUE
+"Mute swan","Cygnus olor",TRUE
+"Nene",NA,FALSE
+"Neotropic cormorant","Phalacrocorax brasilianus",TRUE
+"Night heron",NA,FALSE
+"North american opossum","Didelphis virginiana",TRUE
+"Northern fulmar","Fulmarus glacialis",TRUE
+"Northern fur seal","Callorhinus ursinus",TRUE
+"Northern gannet","Morus bassanus",TRUE
+"Northern giant petrel","Macronectes halli",TRUE
+"Northern goshawk","Astur gentilis",TRUE
+"Northern harrier","Circus hudsonius",TRUE
+"Northern lapwing","Vanellus vanellus",TRUE
+"Northern pintail","Anas acuta",TRUE
+"Northern shoveler","Spatula clypeata",TRUE
+"Northwestern crow","Corvus caurinus",TRUE
+"Norway rat","Rattus norvegicus",TRUE
+"Oriental magpie-robin","Copsychus saularis",TRUE
+"Osprey","Pandion haliaetus",TRUE
+"Ostrich","Struthio camelus",TRUE
+"Otter",NA,FALSE
+"Owl",NA,FALSE
+"Owston's civet","Chrotogale owstoni",TRUE
+"Oystercatcher",NA,FALSE
+"Pacific black duck","Anas superciliosa",TRUE
+"Painted stork","Mycteria leucocephala",TRUE
+"Pallas's sandgrouse","Syrrhaptes paradoxus",TRUE
+"Parasitic jaeger","Stercorarius parasiticus",TRUE
+"Parrot",NA,FALSE
+"Partridge",NA,FALSE
+"Pelican",NA,FALSE
+"Penguin",NA,FALSE
+"Peregrine falcon","Falco peregrinus",TRUE
+"Peruvian booby","Sula variegata",TRUE
+"Peruvian pelican","Pelecanus thagus",TRUE
+"Pet food",NA,FALSE
+"Pheasant",NA,FALSE
+"Pigeon",NA,FALSE
+"Pigeon guillemot","Cepphus columba",TRUE
+"Pika",NA,FALSE
+"Pin-tailed snipe","Gallinago stenura",TRUE
+"Pine marten","Martes martes",TRUE
+"Pink-footed goose","Anser brachyrhynchus",TRUE
+"Pinniped",NA,FALSE
+"Pintado petrel","Daption capense",TRUE
+"Plateau pika","Ochotona curzoniae",TRUE
+"Polar bear","Ursus maritimus",TRUE
+"Polecat",NA,FALSE
+"Pomeranian goose",NA,FALSE
+"Pond heron",NA,FALSE
+"Porpoise",NA,FALSE
+"Purple heron","Ardea purpurea",TRUE
+"Quail",NA,FALSE
+"Raccoon","Procyon lotor",TRUE
+"Raccoon dog","Nyctereutes procyonoides",TRUE
+"Raptor",NA,FALSE
+"Raven",NA,FALSE
+"Raw pet food",NA,FALSE
+"Razorbill","Alca torda",TRUE
+"Red fox","Vulpes vulpes",TRUE
+"Red kite","Milvus milvus",TRUE
+"Red knot","Calidris canutus",TRUE
+"Red-backed hawk","Geranoaetus polyosoma",TRUE
+"Red-billed blue magpie","Urocissa erythroryncha",TRUE
+"Red-billed starling","Spodiopsar sericeus",TRUE
+"Red-breasted goose","Branta ruficollis",TRUE
+"Red-breasted merganser","Mergus serrator",TRUE
+"Red-crested pochard","Netta rufina",TRUE
+"Red-crowned crane","Grus japonensis",TRUE
+"Red-necked grebe","Podiceps grisegena",TRUE
+"Red-necked phalarope","Tringa tobata",TRUE
+"Red-shouldered hawk","Buteo lineatus",TRUE
+"Red-tailed hawk","Buteo jamaicensis",TRUE
+"Redhead duck","Aythya americana",TRUE
+"Reed warbler",NA,FALSE
+"Rhea",NA,FALSE
+"Rhinoceros auklet","Cerorhinca monocerata",TRUE
+"Ring-billed gull","Larus delawarensis",TRUE
+"Ring-necked duck","Aythya collaris",TRUE
+"Ringed seal","Pusa hispida",TRUE
+"Rock pigeon","Columba livia",TRUE
+"Rook","Corvus frugilegus",TRUE
+"Roseate spoonbill","Platalea ajaja",TRUE
+"Ross's goose","Anser rossii",TRUE
+"Rosy-billed pochard","Netta peposaca",TRUE
+"Rough-legged hawk","Buteo lagopus",TRUE
+"Royal tern","Thalasseus maximus",TRUE
+"Ruddy shelduck","Tadorna ferruginea",TRUE
+"Ruddy turnstone","Arenaria interpres",TRUE
+"Ruffed grouse","Bonasa umbellus",TRUE
+"Rufous hornero","Furnarius rufus",TRUE
+"Sabine's gull","Xema sabini",TRUE
+"Sacred ibis","Threskiornis aethiopicus",TRUE
+"Saker falcon","Falco cherrug",TRUE
+"Sanderling","Calidris alba",TRUE
+"Sandhill crane","Antigone canadensis",TRUE
+"Sandpiper",NA,FALSE
+"Sandwich tern","Thalasseus sandvicensis",TRUE
+"Scaly-breasted munia","Lonchura punctulata",TRUE
+"Scarlet ibis","Eudocimus ruber",TRUE
+"Scarlet macaw","Ara macao",TRUE
+"Scoter",NA,FALSE
+"Sea eagle",NA,FALSE
+"Sea lion",NA,FALSE
+"Sea otter","Enhydra lutris",TRUE
+"Seabird",NA,FALSE
+"Seal",NA,FALSE
+"Serval","Leptailurus serval",TRUE
+"Shag","Phalacrocorax aristotelis",TRUE
+"Sharp-shinned hawk","Accipiter striatus",TRUE
+"Shearwater",NA,FALSE
+"Shelduck",NA,FALSE
+"Shorebird",NA,FALSE
+"Short-billed gull","Larus brachyrhynchus",TRUE
+"Short-eared owl","Asio flammeus",TRUE
+"Short-tailed shearwater","Ardenna tenuirostris",TRUE
+"Shrike",NA,FALSE
+"Siberian blue robin","Emberiza variabilis",TRUE
+"Silver pheasant","Lophura nycthemera",TRUE
+"Silver teal","Spatula versicolor",TRUE
+"Silver-eared mesia","Leiothrix argentauris",TRUE
+"Skua",NA,FALSE
+"Skunk",NA,FALSE
+"Slaty-backed gull","Larus schistisagus",TRUE
+"Slender-billed gull","Chroicocephalus genei",TRUE
+"Smew","Mergellus albellus",TRUE
+"Snow goose","Anser caerulescens",TRUE
+"Snowy egret","Egretta thula",TRUE
+"Snowy owl","Bubo scandiacus",TRUE
+"Snowy plover","Anarhynchus nivosus",TRUE
+"Song thrush","Turdus philomelos",TRUE
+"South American coati","Nasua nasua",TRUE
+"South American sea lion","Otaria byronia",TRUE
+"South American tern","Sterna hirundinacea",TRUE
+"South Georgia shag","Leucocarbo georgianus",TRUE
+"South polar skua","Stercorarius maccormicki",TRUE
+"Southern elephant seal","Mirounga leonina",TRUE
+"Southern fulmar","Fulmarus glacialoides",TRUE
+"Sparrow",NA,FALSE
+"Speckled pigeon","Columba guinea",TRUE
+"Spectacled guillemot","Cepphus carbo",TRUE
+"Spoonbill",NA,FALSE
+"Spot-billed duck","Anas poecilorhyncha",TRUE
+"Spotted eagle owl","Bubo africanus",TRUE
+"Spur-winged goose","Plectropterus gambensis",TRUE
+"Square-tailed nightjar","Caprimulgus fossii",TRUE
+"Steamer duck",NA,FALSE
+"Stone curlew",NA,FALSE
+"Stone marten","Martes foina",TRUE
+"Stork",NA,FALSE
+"Striped skunk","Mephitis mephitis",TRUE
+"Surf scoter","Melanitta perspicillata",TRUE
+"Swainson's hawk","Buteo swainsoni",TRUE
+"Swan",NA,FALSE
+"Swan goose","Anser cygnoides",TRUE
+"Swift tern","Thalasseus bergii",TRUE
+"Swiftlet",NA,FALSE
+"Swine","Sus scrofa",TRUE
+"Tawny owl","Strix aluco",TRUE
+"Teal",NA,FALSE
+"Tern",NA,FALSE
+"Thayer's gull","Larus thayeri",TRUE
+"Thick-billed murre","Uria lomvia",TRUE
+"Thrush",NA,FALSE
+"Tibetan blue bear","Ursus arctos",TRUE
+"Tiger","Panthera tigris",TRUE
+"Tree sparrow","Passer montanus",TRUE
+"Tropical screech owl","Megascops choliba",TRUE
+"Tropical shearwater","Puffinus bailloni",TRUE
+"Trumpeter swan","Cygnus buccinator",TRUE
+"Tufted duck","Aythya fuligula",TRUE
+"Tundra bean goose","Anser serrirostris",TRUE
+"Tundra swan","Cygnus columbianus",TRUE
+"Turkey","Meleagris gallopavo",TRUE
+"Turkey vulture","Cathartes aura",TRUE
+"Turtle dove",NA,FALSE
+"Unknown bird",NA,FALSE
+"Ural owl","Strix uralensis",TRUE
+"Von schrenck's bittern","Ixobrychus eurhythmus",TRUE
+"Waterbird",NA,FALSE
+"Watercock","Gallicrex cinerea",TRUE
+"Waterfowl",NA,FALSE
+"Western barn owl","Tyto alba",TRUE
+"Western cattle egret","Bubulcus ibis",TRUE
+"Western grebe","Aechmophorus occidentalis",TRUE
+"Western gull","Larus occidentalis",TRUE
+"Western marsh harrier","Circus aeruginosus",TRUE
+"Western sandpiper","Calidris mauri",TRUE
+"Western screech owl","Megascops kennicottii",TRUE
+"Whiskered tern","Chlidonias hybrida",TRUE
+"Whistling duck",NA,FALSE
+"White mink","Mustela erminea",TRUE
+"White stork","Ciconia ciconia",TRUE
+"White-backed munia","Lonchura striata",TRUE
+"White-backed stilt","Himantopus himantopus",TRUE
+"White-breasted cormorant","Phalacrocorax lucidus",TRUE
+"White-eyed pochard","Aythya nyroca",TRUE
+"White-faced ibis","Plegadis chihi",TRUE
+"White-faced whistling duck","Dendrocygna viduata",TRUE
+"White-fronted goose","Anser albifrons",TRUE
+"White-naped crane","Antigone vipio",TRUE
+"White-tailed eagle","Haliaeetus albicilla",TRUE
+"White-winged black tern","Chlidonias leucopterus",TRUE
+"White-winged dove","Zenaida asiatica",TRUE
+"White-winged scoter","Melanitta fusca",TRUE
+"Whooper swan","Cygnus cygnus",TRUE
+"Whooping crane","Grus americana",TRUE
+"Willet","Tringa semipalmata",TRUE
+"Wood duck","Aix sponsa",TRUE
+"Yellow-billed duck","Anas undulata",TRUE
+"Yellow-billed pintail","Anas georgica",TRUE
+"Yellow-billed teal","Anas flavirostris",TRUE
+"Yellow-headed amazon","Amazona oratrix",TRUE
+"Yellow-legged gull","Larus michahellis",TRUE
