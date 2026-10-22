@@ -24,9 +24,3 @@ Due to limitations with data sharing, we have excluded the data files from this 
 
 ## 07_summarize_clean
 * summary plots of the final clean data analyzed
-
-## 08_all-together - THIS SHOULD BE MERGED INTO clean-share
-* all key data together
-
-## 08_clean-share
-* output from all-together that is renamed with simpler sample ID 
