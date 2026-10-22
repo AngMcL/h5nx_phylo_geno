@@ -1,0 +1,53 @@
+---
+title: "cowplots"
+author: "It's me! Angela!"
+date: "2026-01-20"
+output: html_document
+---
+
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-01-27_out"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+files<-c("treemap_class-aves_color-order_label-common.png",
+         "treemap_class-mammal_color-order_label-common.png")
+
+paths<-path(img_dir,files)
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+if(any(!file_exists(paths))){
+  message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+}else{
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=1,nrow=2,
+                  labels=c("A","B"),
+                  label_size=16,
+                  label_x=0.02,
+                  label_y=0.98,
+                  hjust=0,
+                  vjust=1)
+
+  out_name<-"treemap_class_aves_vs_mammal_comp_long.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=3.5,height=4.2,dpi=300,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+
