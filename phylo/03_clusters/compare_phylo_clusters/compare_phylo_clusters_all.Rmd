@@ -1,0 +1,583 @@
+---
+title: "compare_phylo_clusters_all"
+output: html_document
+date: "2026-06-27"
+---
+
+## Objectives
+* One consolidated, parameterized script for all 8 segments (replaces the per-segment Rmds).
+* Each segment tree carries 6 gheatmap columns: Genoflu cluster, Genoflu genotype,
+  Genin cluster, Genin genotype, TC cluster, TC genotype.
+* The 3 genome-wide genotype scales (genoflu_geno, genin_geno, tc_geno) share ONE master
+  palette across all segments, persisted to `palettes/genotype_palettes.rds` so colors are
+  stable across segments and reruns. The 3 cluster scales are per-segment (IDs not comparable
+  across segments) and get their own seeded palettes.
+* Legends are ordered by tip position (top to bottom of the tree), capped to the top-16 most
+  frequent values per scale.
+* Genin has no HA cluster (`genin_clusterHA` does not exist) so HA's genin-cluster column
+  renders all-grey but the slot is kept for layout consistency.
+* HA gets an extra variant with an H5 clade column (leftmost); NA gets one with subtype.
+* Per segment: full tree + B3.13 + D1.1 genotype-MRCA subtrees.
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+library(ape)
+library(ggtree)
+library(gtools)
+library(RColorBrewer)
+library(ggnewscale)
+```
+
+```{r}
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                    panel.background = element_rect("grey95"),
+                    axis.line = element_line(colour = "black"),
+                    text = element_text(size = 10, face = "bold"),
+                    legend.text = element_text(size = 8),
+                    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+## helpers
+```{r}
+# Tip labels ordered top to bottom of a ggtree plot (highest y first).
+tip_top_order<-function(ggt){
+  ggt$data %>% filter(isTip) %>% arrange(desc(y)) %>% pull(label)
+}
+
+# Legend breaks: keep the top-n categories by frequency, then order them by first
+# appearance from the top of the tree. vals is a named character vector (names = tips).
+# Returns character(0) when everything is NA so the scale's legend shows nothing.
+ordered_breaks<-function(vals, tip_order, n = 16){
+  present<-vals[!is.na(vals)]
+  if(length(present)==0) return(character(0))
+  counts<-sort(table(present), decreasing = TRUE)
+  keep<-names(counts)[seq_len(min(n, length(counts)))]
+  ordered_vals<-vals[tip_order]
+  first_seen<-unique(ordered_vals[!is.na(ordered_vals)])
+  first_seen[first_seen %in% keep]
+}
+```
+
+## ins/outs
+```{r}
+segments<-c("HA","NA","M","NP","NS","PA","PB1","PB2")
+
+tree.fold<-"../../02_iqtree/iq_gtrfr10_rooted/"
+geno.in<-"../../../data/08_clean-share/meta/metadata.csv"
+genolook.fold<-"../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+
+today<-Sys.Date()
+f.out<-paste0(today, "_compare_clusters_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+geno<-read.csv(geno.in)
+```
+
+## Master palettes (persisted, shared across segments)
+```{r}
+palette.file<-"palettes/genotype_palettes.rds"
+
+# Clean the sentinel "unassigned" strings to NA before assigning colors.
+clean_vals<-function(x){
+  x<-as.character(x)
+  x[x %in% c("Not assigned","[unassigned]","")]<-NA
+  sort(unique(na.omit(x)))
+}
+
+# NA (neuraminidase) type from a subtype string: "H5N1" -> "N1" (NA if no Nx present).
+na_type_of<-function(x) str_extract(as.character(x), "N\\d+")
+
+# Build a qualitative palette: shuffle (seeded) so neighboring categories get distinct
+# colors, then ramp the brewer palette across them.
+make_palette<-function(vals, brewer.name, brewer.n, seed = 42){
+  if(length(vals)==0) return(setNames(character(0), character(0)))
+  set.seed(seed)
+  ord<-sample(vals)
+  setNames(colorRampPalette(brewer.pal(brewer.n, brewer.name))(length(ord)), ord)
+}
+
+# Build once from the full metadata (all genome-wide values), then persist. Set force=TRUE
+# to regenerate intentionally (e.g. after new genotypes enter the data).
+build_master_palettes<-function(geno, force = TRUE){
+  if(file.exists(palette.file) && !force) return(readRDS(palette.file))
+  pals<-list(
+    genoflu_geno   = make_palette(clean_vals(geno$genoflu_geno),  "Paired",  12),
+    genin_geno     = make_palette(clean_vals(geno$genin_geno),    "Dark2",   8),
+    tc_geno        = make_palette(clean_vals(geno$tc_geno),       "Accent",  8),
+    subtype_filled = make_palette(clean_vals(geno$subtype_filled),"Pastel2", 8),
+    na_type        = make_palette(clean_vals(na_type_of(geno$subtype_filled)),"Pastel2", 8),
+    HAclade_filled = make_palette(clean_vals(geno$HAclade_filled),"Pastel1", 9)
+  )
+  if(!dir.exists("palettes")){dir.create("palettes")}
+  saveRDS(pals, palette.file)
+  pals
+}
+
+#switch to force=F if you don't want to regenerate palette evert time
+palettes<-build_master_palettes(geno, force = TRUE)
+```
+
+## Per-segment annotation builder
+```{r}
+build_anno<-function(focal.segment, geno){
+  tree.in<-list.files(tree.fold, pattern = paste0("_", focal.segment, "_"), full.names = TRUE)
+  tree<-ape::read.tree(tree.in)
+
+  genolook.in<-paste0(genolook.fold, "trim_nodup_nuc_", focal.segment, "_rooted_resid.csv")
+  genolook<-read.csv(genolook.in)  # columns: sample, seq_new (already segment-specific)
+
+  tc_col<-paste0("tc_cluster", focal.segment)
+  geno_col<-paste0("genoflu_cluster", focal.segment)
+  genin_col<-paste0("genin_cluster", focal.segment)  # absent for HA
+  have_genin<-genin_col %in% names(geno)
+
+  sel<-geno %>%
+    select(sample, taxa2, region,
+           all_of(tc_col), all_of(geno_col), any_of(genin_col),
+           subtype_filled, HAclade_filled,
+           tc_geno, genoflu_geno, genin_geno)
+
+  anno<-data.frame(seq_new = tree$tip.label) %>%
+    left_join(genolook %>% select(seq_new, sample), by = "seq_new") %>%
+    left_join(sel, by = "sample") %>%
+    rename(tc_cluster = all_of(tc_col), geno_cluster = all_of(geno_col))
+
+  if(have_genin){
+    anno<-anno %>% rename(genin_cluster = all_of(genin_col))
+  } else {
+    anno$genin_cluster<-NA_character_
+  }
+
+  # Sentinel unassigned -> NA
+  anno$genoflu_geno[anno$genoflu_geno=="Not assigned"]<-NA
+  anno$genin_geno[anno$genin_geno=="[unassigned]"]<-NA
+  anno$genin_cluster[anno$genin_cluster %in% c("[unassigned]","")]<-NA
+
+  # NA type (Nx) derived from the subtype, e.g. H5N1 -> N1 (for the NA-segment plots)
+  anno$na_type<-na_type_of(anno$subtype_filled)
+
+  cat("== ", focal.segment, " ==\n", sep="")
+  cat("Tips:", length(tree$tip.label),
+      "| missing sample:", sum(is.na(anno$sample)),
+      "| missing genin_cluster:", sum(is.na(anno$genin_cluster)), "\n")
+
+  list(tree = tree, anno = anno)
+}
+```
+
+## Per-segment cluster palettes (not shared across segments)
+```{r}
+build_cluster_palettes<-function(anno, seed = 69){
+  list(
+    genoflu_cluster = make_palette(clean_vals(anno$geno_cluster),  "Set1", 9, seed),
+    genin_cluster   = make_palette(clean_vals(anno$genin_cluster), "Set2", 8, seed),
+    tc_cluster      = make_palette(clean_vals(anno$tc_cluster),    "Set3", 12, seed)
+  )
+}
+```
+
+## Column spec builders
+```{r}
+# A "spec" is one gheatmap column: which anno column, its label, legend name, palette,
+# legend cap, and legend columns. make_plot() stacks them left to right.
+base_specs<-function(palettes, cl_pals){
+  list(
+    list(col="geno_cluster",  label="Genoflu cluster",  name="Genoflu cluster",          cols=cl_pals$genoflu_cluster, cap=16, ncol=2),
+    list(col="genoflu_geno",  label="Genoflu genotype", name="Genoflu genotype (top16)", cols=palettes$genoflu_geno,   cap=16, ncol=2),
+    list(col="genin_cluster", label="Genin cluster",    name="Genin cluster",            cols=cl_pals$genin_cluster,   cap=16, ncol=2),
+    list(col="genin_geno",    label="Genin genotype",   name="Genin genotype (top16)",   cols=palettes$genin_geno,     cap=16, ncol=2),
+    list(col="tc_cluster",    label="TC cluster",       name="TC cluster (top16)",       cols=cl_pals$tc_cluster,      cap=16, ncol=2),
+    list(col="tc_geno",       label="TC genotype",      name="TC genotype (top16)",      cols=palettes$tc_geno,        cap=16, ncol=1)
+  )
+}
+
+clade_spec<-function(palettes){
+  list(col="HAclade_filled", label="H5 clade", name="H5 clade (top16)", cols=palettes$HAclade_filled, cap=16, ncol=2)
+}
+subtype_spec<-function(palettes){
+  list(col="na_type", label="NA type", name="NA type", cols=palettes$na_type, cap=16, ncol=2)
+}
+```
+
+## Generic plotter
+```{r}
+# Stack a list of column specs onto a tree. Legend breaks are recomputed from whatever
+# tips are in `tree`, so the same function serves full trees and subtrees.
+make_plot<-function(tree, anno, specs, file, width = 11, height = 18,
+                    font.size = 4, colnames_offset_y = 1.5, legend.box.spacing = 2,
+                    legend.key.cm = 0.8, legend.text.size = 14, legend.title.size = 16,
+                    legend.title.face = "plain",
+                    seg.label = NULL, seg.label.size = 11, seg.label.yfrac = 1.06,
+                    n.label.size = 5, n.label.yfrac = 1.02, label.xfrac = 0.05,
+                    treescale.fontsize = 3, treescale.gap.frac = NULL,
+                    treescale.width = NULL, treescale.right = FALSE, treescale.xfrac = 0.6,
+                    left.margin = 34, bottom.margin = 28){
+  col_width<-0.10
+  gap<-0.01
+  NN<-Ntip(tree)
+  x_range<-max(node.depth.edgelength(tree))
+
+  # treescale.gap.frac -> gap between scale bar and its label, as a fraction of Ntip.
+  # treescale.right -> right-align the bar at the right edge of the tree (rel x = 1),
+  # else place its left end at x_range * treescale.xfrac.
+  ts.gap<-if(is.null(treescale.gap.frac)) NULL else NN * treescale.gap.frac
+  ts.x<-if(isTRUE(treescale.right)){
+    x_range - (if(is.null(treescale.width)) 0 else treescale.width)
+  } else x_range * treescale.xfrac
+  t<-ggtree(tree) +
+    geom_treescale(x = ts.x, y = NN, width = treescale.width, fontsize = treescale.fontsize,
+                   linesize = 0.5, offset.label = ts.gap)
+  tip_order<-tip_top_order(t)
+
+  p<-t
+  for(i in seq_along(specs)){
+    s<-specs[[i]]
+    offset<-x_range * (i*gap + (i-1)*col_width)
+
+    heat<-anno %>%
+      column_to_rownames("seq_new") %>%
+      select(all_of(s$col)) %>%
+      mutate(across(everything(), as.character))
+    heat<-heat[rownames(heat) %in% tree$tip.label, , drop = FALSE]
+
+    vals<-setNames(heat[[1]], rownames(heat))
+    brks<-ordered_breaks(vals, tip_order, n = s$cap)
+
+    p<-gheatmap(p, heat,
+                offset = offset, width = col_width, color = NA,
+                colnames = TRUE, colnames_offset_y = colnames_offset_y, hjust = 0,
+                font.size = font.size, colnames_position = "top", colnames_angle = 45,
+                custom_column_labels = s$label) +
+      scale_fill_manual(values = s$cols, na.value = "grey90", name = s$name,
+                        breaks = brks, guide = guide_legend(order = i, ncol = s$ncol))
+
+    if(i==1){
+      p<-p +
+        theme(margins = margin(1,1,1,1,unit = "pt")) +
+        coord_cartesian(ylim = c(0, NN*1.1), clip = "off")
+    }
+    if(i<length(specs)){
+      p<-p + new_scale_fill()
+    }
+  }
+
+  # segment name (large bold) + tip count, upper-left
+  if(!is.null(seg.label)){
+    p<-p +
+      annotate("text", x = x_range*label.xfrac, y = NN*seg.label.yfrac, label = seg.label,
+               hjust = 0.5, vjust = 1, fontface = "bold", size = seg.label.size) +
+      annotate("text", x = x_range*label.xfrac, y = NN*n.label.yfrac, label = paste0("n=", NN),
+               hjust = 0.5, vjust = 1, size = n.label.size)
+  }
+
+  p_themed<-p + theme(legend.box.spacing = unit(legend.box.spacing, "cm"),
+                      legend.key.size = unit(legend.key.cm, "cm"),
+                      legend.text = element_text(size = legend.text.size),
+                      legend.title = element_text(size = legend.title.size, face = legend.title.face),
+                      plot.margin = margin(5.5, 5.5, bottom.margin, left.margin, "pt"))
+  # file = NULL -> don't write, just return the themed object (used to assemble composites)
+  if(!is.null(file)){
+    ggsave(file, plot = p_themed, width = width, height = height, units = "in")
+  }
+  invisible(p_themed)
+}
+
+# Extract the clade rooted at the MRCA of tips with anno[[filter_col]] == filter_val,
+# then plot it with the same specs.
+plot_subtree<-function(tree, anno, specs, filter_col, filter_val, file, seg.label = NULL,
+                       font.size = 5, colnames_offset_y = 1, ...){
+  tips<-anno$seq_new[which(anno[[filter_col]]==filter_val)]
+  tips<-tips[tips %in% tree$tip.label]
+  cat("Tips in", filter_val, ":", length(tips), "\n")
+  if(length(tips)<3){message("  too few tips, skipping ", filter_val); return(invisible(NULL))}
+  node<-getMRCA(tree, tip = tips)
+  sub<-ape::extract.clade(tree, node)
+  cat("  subtree tips:", Ntip(sub), "\n")
+  make_plot(sub, anno, specs, file = file,
+            width = 11, height = 18, font.size = font.size, colnames_offset_y = colnames_offset_y,
+            seg.label = seg.label, ...)
+}
+```
+
+# Run all segments
+```{r}
+# top-8 most common genotypes (data-driven), used for genotype-MRCA subtrees
+top_genotypes<-function(x, n = 8){
+  x<-as.character(x); x[x %in% c("Not assigned","[unassigned]","")]<-NA
+  na.omit(names(sort(table(x), decreasing = TRUE))[seq_len(n)])
+}
+genoflu_top<-top_genotypes(geno$genoflu_geno)
+genin_top<-top_genotypes(geno$genin_geno)
+safe<-function(s) gsub("[^A-Za-z0-9._-]", "_", s)
+cat("GenoFLU subtrees:", paste(genoflu_top, collapse=", "), "\n")
+cat("GenIn subtrees:", paste(genin_top, collapse=", "), "\n")
+
+# genotype subtrees go in genotype_trees/<scheme>_<genotype>/ (one subfolder per genotype)
+gt.out<-paste0(f.out, "genotype_trees/")
+if(!dir.exists(gt.out)){dir.create(gt.out)}
+geno_dir<-function(prefix, g){
+  d<-paste0(gt.out, prefix, "_", safe(g), "/")
+  if(!dir.exists(d)){dir.create(d)}
+  d
+}
+
+for(seg in segments){
+  bundle<-build_anno(seg, geno)
+  tree<-bundle$tree
+  anno<-bundle$anno
+
+  cl_pals<-build_cluster_palettes(anno)
+  specs<-base_specs(palettes, cl_pals)
+  # genoflu-genotype subtrees drop the genin columns; genin-genotype subtrees drop genoflu
+  specs_genoflu<-Filter(function(s) !s$col %in% c("genin_cluster","genin_geno"), specs)
+  specs_genin  <-Filter(function(s) !s$col %in% c("geno_cluster","genoflu_geno"), specs)
+
+  # full tree, 6 columns (slightly smaller legend tiles)
+  make_plot(tree, anno, specs,
+            file = paste0(f.out, seg, "_full_gheatmap.tiff"),
+            seg.label = seg, legend.key.cm = 0.65)
+
+  # GenoFLU genotype-MRCA subtrees (4 cols: genoflu cluster/geno + TC cluster/geno)
+  for(g in genoflu_top){
+    plot_subtree(tree, anno, specs_genoflu, "genoflu_geno", g,
+                 file = paste0(geno_dir("genoflu", g), seg, "_genoflu_", safe(g), "_gheatmap.tiff"),
+                 seg.label = seg)
+  }
+  # GenIn genotype-MRCA subtrees (4 cols: genin cluster/geno + TC cluster/geno)
+  for(g in genin_top){
+    plot_subtree(tree, anno, specs_genin, "genin_geno", g,
+                 file = paste0(geno_dir("genin", g), seg, "_genin_", safe(g), "_gheatmap.tiff"),
+                 seg.label = seg)
+  }
+
+  # HA/NA variant with an extra leftmost column
+  if(seg=="HA"){
+    specs_v<-c(list(clade_spec(palettes)), specs)
+    make_plot(tree, anno, specs_v,
+              file = paste0(f.out, seg, "_full_gheatmap_H5clade.tiff"),
+              width = 12, seg.label = seg, legend.key.cm = 0.65)
+  }
+  if(seg=="NA"){
+    specs_v<-c(list(subtype_spec(palettes)), specs)
+    make_plot(tree, anno, specs_v,
+              file = paste0(f.out, seg, "_full_gheatmap_subtype.tiff"),
+              width = 12, seg.label = seg, legend.key.cm = 0.65)
+  }
+}
+```
+
+# Publication composites (cowplot)
+Assembles 2x2 grids for insertion into a Word doc. Two segment groups:
+group A = PB2, PB1, PA, HA; group B = NA, NP, NS, M. Built for the full trees and
+for every GenoFLU/GenIn top-8 genotype (genotype composites land in each genotype's
+folder as `composite_plot_geno_<group>.tiff`). Exported as TIFF at 300 dpi.
+
+This chunk is self-contained: it rebuilds each panel object with the same functions
+used above (`make_plot(..., file = NULL)` returns the themed panel without writing the
+per-segment file), so it can be run on its own. It re-renders the trees, so it is
+compute-heavy — expect a long run for the full trees.
+```{r}
+library(cowplot)
+
+# segment groups (2x2 each), in panel order
+comp_groups<-list(
+  "PB2_PB1_PA_HA" = c("PB2","PB1","PA","HA"),
+  "NA_NP_NS_M"    = c("NA","NP","NS","M")
+)
+
+# export dims for a 2x2 grid of tall tree+legend panels; LZW keeps the TIFFs small.
+# wider canvas so the figure fills the page width (panels scale to fit).
+comp.width<-34
+comp.height<-32
+comp.dpi<-300
+
+# enlarged text styling for the composite panels (bigger for publication / Word). These are
+# shared across full-tree and subtree panels; column-name size/offset are set per call below
+# (doubled relative to each context's standalone size). Standalone plots are unaffected.
+cp.style<-list(
+  legend.text.size   = 14 * 1.5,   # +50%
+  legend.title.size  = 16 * 1.5,   # +50%
+  legend.title.face  = "bold",     # bold legend titles
+  seg.label.size     = 11 * 1.25,  # +25%
+  n.label.size       = 5  * 1.25,  # +25%
+  treescale.fontsize = 6,          # scale-bar text (was 3)
+  treescale.gap.frac = 0.05,       # gap between scale bar and its label (fraction of Ntip)
+  treescale.width    = 0.05,       # all scale bars show 0.05 -- fine for full trees only
+  treescale.right    = TRUE        # top-right of the tree, right-aligned at rel x = 1
+)
+
+# genotype-MRCA subtree panels are much shallower than full trees (root-to-tip depth on
+# the order of 0.003-0.04 subs/site vs 0.05 for cp.style's fixed bar width), so a
+# right-aligned 0.05-wide bar routinely lands at a NEGATIVE x position, forcing ggplot to
+# expand the x-axis to fit it and squashing the actual tree into a sliver of the panel.
+# Same style as cp.style but a bar small enough to fit every subtree, and top-left instead
+# of top-right. xfrac=0.25 (not label.xfrac's 0.05) -- tested directly against label.xfrac,
+# which collides with the bold seg.label/n= text sitting right at x_range*0.05.
+cp.style.subtree<-modifyList(cp.style, list(
+  treescale.width = 0.005, treescale.right = FALSE, treescale.xfrac = 0.25
+))
+
+# placeholder for a segment/genotype combo that has too few tips to plot
+blank_panel<-function(lab){
+  ggdraw() + draw_label(lab, fontface = "italic", size = 22, colour = "grey40")
+}
+
+# arrange a named list of panel objects into a 2x2 grid (filling missing panels)
+assemble_grid<-function(objs, segs){
+  pl<-lapply(segs, function(s){
+    o<-objs[[s]]
+    if(is.null(o)) blank_panel(paste0(s, ": n/a")) else o
+  })
+  plot_grid(plotlist = pl, ncol = 2)
+}
+
+save_composite<-function(grid, file){
+  ggsave(file, plot = grid, width = comp.width, height = comp.height,
+         units = "in", dpi = comp.dpi, compression = "lzw", limitsize = FALSE)
+  cat("wrote", file, "\n")
+}
+
+# build per-segment panels once, reused across both groups and (for full trees) saved
+full_objs<-list()
+gf_objs<-setNames(vector("list", length(genoflu_top)), genoflu_top)  # gf_objs[[g]][[seg]]
+gi_objs<-setNames(vector("list", length(genin_top)),   genin_top)
+
+for(seg in segments){
+  bundle<-build_anno(seg, geno)
+  tree<-bundle$tree
+  anno<-bundle$anno
+
+  cl_pals<-build_cluster_palettes(anno)
+  specs<-base_specs(palettes, cl_pals)
+  specs_genoflu<-Filter(function(s) !s$col %in% c("genin_cluster","genin_geno"), specs)
+  specs_genin  <-Filter(function(s) !s$col %in% c("geno_cluster","genoflu_geno"), specs)
+
+  # full-tree panel (no per-segment file; the main run loop already wrote those).
+  # HA adds the H5-clade column (leftmost); NA adds the subtype column, matching the
+  # *_full_gheatmap_H5clade / _subtype variants.
+  full_specs<-specs
+  if(seg=="HA") full_specs<-c(list(clade_spec(palettes)), specs)
+  if(seg=="NA") full_specs<-c(list(subtype_spec(palettes)), specs)
+  # widen full-tree legends to 4 columns so the stacked legend box is shorter and does not
+  # get cut off in the composites; tc_geno stays ncol=1 (whole-genome strings too long).
+  full_specs<-lapply(full_specs, function(s){if(s$col!="tc_geno") s$ncol<-4; s})
+  # column names enlarged (4 -> 7.2) and shifted further off the columns (1.5 -> 3)
+  full_objs[[seg]]<-do.call(make_plot, c(
+    list(tree, anno, full_specs, file = NULL, seg.label = seg, legend.key.cm = 0.65,
+         font.size = 7.2, colnames_offset_y = 3), cp.style))
+
+  # genotype-MRCA subtree panels (returned, not written); column names enlarged (5 -> 9)
+  # and shifted further off the columns (1 -> 2)
+  for(g in genoflu_top){
+    gf_objs[[g]][[seg]]<-do.call(plot_subtree, c(
+      list(tree, anno, specs_genoflu, "genoflu_geno", g, file = NULL, seg.label = seg,
+           font.size = 9, colnames_offset_y = 2), cp.style.subtree))
+  }
+  for(g in genin_top){
+    gi_objs[[g]][[seg]]<-do.call(plot_subtree, c(
+      list(tree, anno, specs_genin, "genin_geno", g, file = NULL, seg.label = seg,
+           font.size = 9, colnames_offset_y = 2), cp.style.subtree))
+  }
+}
+
+# full-tree composites
+comp.out<-paste0(f.out, "composites/")
+if(!dir.exists(comp.out)){dir.create(comp.out)}
+for(gn in names(comp_groups)){
+  save_composite(assemble_grid(full_objs, comp_groups[[gn]]),
+                 paste0(comp.out, "composite_full_", gn, ".tiff"))
+}
+
+# genotype composites -> into each genotype's folder
+for(g in genoflu_top){
+  for(gn in names(comp_groups)){
+    save_composite(assemble_grid(gf_objs[[g]], comp_groups[[gn]]),
+                   paste0(geno_dir("genoflu", g), "composite_plot_geno_", gn, ".tiff"))
+  }
+}
+for(g in genin_top){
+  for(gn in names(comp_groups)){
+    save_composite(assemble_grid(gi_objs[[g]], comp_groups[[gn]]),
+                   paste0(geno_dir("genin", g), "composite_plot_geno_", gn, ".tiff"))
+  }
+}
+```
+
+# All-8-segment composites (single figure)
+One figure with all 8 segments in standard IAV order (PB2, PB1, PA, HA, NP, NA, M, NS),
+4 columns x 2 rows, left-to-right / top-to-bottom. Exported at double the width of the 2x2
+composites above. Reuses the panel objects (`full_objs` / `gf_objs` / `gi_objs`) built in the
+previous chunk, so run that chunk first.
+```{r}
+if(!exists("full_objs")){
+  stop("Run the 'Publication composites (cowplot)' chunk first to build the panel objects.")
+}
+
+seg_order8<-c("PB2","PB1","PA","HA","NP","NA","M","NS")  # standard IAV order
+comp8.width<-comp.width * 2   # double width vs the 2x2 composites
+comp8.height<-comp.height
+comp8.ncol<-4
+
+assemble_grid8<-function(objs){
+  pl<-lapply(seg_order8, function(s){
+    o<-objs[[s]]
+    if(is.null(o)) blank_panel(paste0(s, ": n/a")) else o
+  })
+  plot_grid(plotlist = pl, ncol = comp8.ncol)
+}
+
+save_composite8<-function(grid, file){
+  ggsave(file, plot = grid, width = comp8.width, height = comp8.height,
+         units = "in", dpi = comp.dpi, compression = "lzw", limitsize = FALSE)
+  cat("wrote", file, "\n")
+}
+
+# full tree, all 8 segments
+save_composite8(assemble_grid8(full_objs),
+                paste0(comp.out, "composite_full_all8.tiff"))
+
+# genotype trees, all 8 segments -> into each genotype's folder
+for(g in genoflu_top){
+  save_composite8(assemble_grid8(gf_objs[[g]]),
+                  paste0(geno_dir("genoflu", g), "composite_plot_geno_all8.tiff"))
+}
+for(g in genin_top){
+  save_composite8(assemble_grid8(gi_objs[[g]]),
+                  paste0(geno_dir("genin", g), "composite_plot_geno_all8.tiff"))
+}
+```
+
+# High-resolution full-tree composites (TIFF + PNG)
+Re-exports the full-tree composites (both 2x2 groups + all-8) at `hires.dpi` as both TIFF and
+PNG, same canvas size as above, so only pixel density changes. Written to `composites/` with
+a `_<dpi>dpi` suffix. Uses ragg devices, which cope with very large rasters (the base png device
+can fail at these sizes). Reuses `full_objs`, so run the 'Publication composites' chunk first.
+The all-8 figure uses `hires8.dpi` (450) because its canvas is too large for ragg at 600 dpi.
+```{r}
+if(!exists("full_objs")){
+  stop("Run the 'Publication composites (cowplot)' chunk first to build the panel objects.")
+}
+
+hires.dpi<-600
+# ragg caps a raster at ~2^31 bytes (~536M px RGBA). The all-8 canvas (68 x 32 in) exceeds that
+# at 600 dpi (783M px), so it gets its own lower dpi: 450 -> 30600 x 14400 px (~441M px).
+hires8.dpi<-450
+
+save_hires<-function(grid, file.stem, width, height, dpi = hires.dpi){
+  ggsave(paste0(file.stem, "_", dpi, "dpi.tiff"), plot = grid, device = ragg::agg_tiff,
+         width = width, height = height, units = "in", dpi = dpi,
+         compression = "lzw", limitsize = FALSE)
+  ggsave(paste0(file.stem, "_", dpi, "dpi.png"), plot = grid, device = ragg::agg_png,
+         width = width, height = height, units = "in", dpi = dpi, limitsize = FALSE)
+  cat("wrote", file.stem, "(tiff + png) at", dpi, "dpi\n")
+}
+
+for(gn in names(comp_groups)){
+  save_hires(assemble_grid(full_objs, comp_groups[[gn]]),
+             paste0(comp.out, "composite_full_", gn), comp.width, comp.height)
+}
+save_hires(assemble_grid8(full_objs),
+           paste0(comp.out, "composite_full_all8"), comp8.width, comp8.height, dpi = hires8.dpi)
+```
