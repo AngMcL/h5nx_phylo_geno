@@ -1,0 +1,1474 @@
+---
+title: "Summarize final clean data"
+output: github_document
+date: "2026-09-28"
+---
+
+# Objectives
+
+* Read in the final clean metadata, sequences (fasta), and trees from the canonical 08_all-together directory
+  - post-removal of temporal outliers, low-quality/identical sequences, dirty metadata
+  - verify all tip names match seq_new
+* Join corrected host taxonomy (duck/mallard fix) and multi-taxa groupings from 08_all-together/annot/
+* Fill in subtypes and H5 clades from phylogenetically inferred assignments
+* Make summary figures for cleaned aligned data
+
+## Changes from v3
+
+* Filled-in H5 (HA) clades + N types now read directly from the most recent subtype/clade fill-in
+  run, `phylo/03_clusters/subtype_clades/2026-07-01_out/sample_filledin_N-type_HA-clade.csv`
+  (identical to the `08_all-together/annot/` copy used in v3 as of 2026-09-28; checked: 41366
+  samples, no clade/N-type differences). Join now asserts no duplicate samples, every sample
+  matched, and no blank clades
+* New H5 clade plot set (mirrors the subtype-through-time plots): proportion barplots by year,
+  stacked N-sample barplots by year, and smoothed proportional stacked density (sums to 1), each
+  for the full date range and 1996+. New hierarchical clade palette (`clade.cols`), saved to
+  `h5_clade_colors.csv`
+* Smoothed proportional density plots added for subtype too, for consistency across plot sets
+* Composites renumbered Fig 1 -> Fig 2 and Fig S1 -> Fig S2 (manuscript numbering); only the
+  `_map` versions are output. New 5-panel layout: A year-count / B subtype / C H5 clade stacked
+  and touching (year axis on C only), D host, E map; larger year-axis text, bold legend titles,
+  bigger subtype (+20%) / clade (+10%) legend text, larger host colourbar. Map label fixes
+  flagged as upstream TODO
+* Bug fixes: duplicate-index column drop (`-which()` would drop ALL columns when none matched);
+  country thresholds used `$N` (column is `n`) so the >=10/>=50 country plots were empty; host
+  "<50" plot y-label said N<10
+
+## Changes from v2
+
+* Inputs switched from `phylo/.../rem_out/` to canonical `08_all-together/` (nuc_seq, phylo_trees, annot)
+* Trees: FastTree `.tre` → IQTREE2 `.treefile`
+* Host duck→mallard bug fixed via join with `sample_taxa_lookup_all` (see below)
+* Subtype: phylogenetically filled subtypes (`sample_filledin_N-type_HA-clade.csv`) now used as primary via `coalesce(subtype_fill, subtype.raw)`; previously only patched mismatches and silently skipped NA subtypes
+* Country rename: South Georgia entry was a bare unnamed string in `str_replace_all()` — silently ignored rather than substituted; now a proper named vector entry
+* Name checks in read loop changed from silent `all()` evaluation to `stopifnot()`
+* Segment label now extracted from filename rather than assumed from sort-index position
+
+# Setup
+## libs
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r libs, message=FALSE}
+library(tidyverse)
+library(Biostrings)
+library(NatParksPalettes)
+library(gtools)
+library(ape)
+library(cowplot)
+library(ggh4x)
+library(patchwork)  # composite figures (loaded after cowplot; masks cowplot::align_plots)
+```
+
+## themes
+```{r}
+plot.theme <- theme(panel.grid.minor = element_blank(),
+                    panel.background = element_rect("grey95"),
+                    axis.line = element_line(colour = "black"),
+                    text = element_text(size = 10),
+                    legend.text = element_text(size = 8),
+                    axis.title = element_text(face="bold"))
+plot.theme.date <- plot.theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+## Ins and outs
+```{r}
+# Canonical clean data from 08_all-together
+f.in.nuc   <- "../08_all-together/nuc_seq/"
+f.in.tree  <- "../08_all-together/phylo_trees/"
+f.in.annot <- "../08_all-together/annot/"
+# most recent phylogenetic fill-in of N types (NA tree) and H5 clades (HA tree)
+f.in.fill  <- "../../phylo/03_clusters/subtype_clades/2026-07-01_out/sample_filledin_N-type_HA-clade.csv"
+
+meta.in  <- list.files(path = f.in.nuc,  pattern = "_meta\\.csv$",   full.names = T) %>% mixedsort()
+fasta.in <- list.files(path = f.in.nuc,  pattern = "\\.fasta$",      full.names = T) %>% mixedsort()
+tree.in  <- list.files(path = f.in.tree, pattern = "\\.treefile$",   full.names = T) %>% mixedsort()
+stopifnot(length(meta.in) == length(fasta.in), length(fasta.in) == length(tree.in))
+l.tre <- length(tree.in)
+
+# outputs
+today <- Sys.Date()
+f.out <- paste0(today, "_out/")
+if (!dir.exists(f.out)) {dir.create(f.out)}
+```
+
+# Read in final clean metadata, sequences, and trees
+```{r}
+segments <- c("PB2", "PB1", "PA", "HA", "NP", "NA", "M", "NS")
+
+tree <- nuc <- meta <- replicate(n = l.tre, vector())
+for (i in 1:l.tre) {
+  nuc[[i]]  <- Biostrings::readDNAStringSet(fasta.in[i])
+  meta[[i]] <- read.csv(meta.in[i])
+  tree[[i]] <- read.tree(tree.in[i])
+
+  # verify all names align (bug fix: was silently evaluated before)
+  stopifnot(all(names(nuc[[i]]) %in% meta[[i]]$seq_new))
+  stopifnot(all(tree[[i]]$tip.label %in% meta[[i]]$seq_new))
+
+  # remove duplicate index cols (v3 used -which(), which drops ALL columns if none match)
+  meta[[i]] <- meta[[i]] %>% select(-any_of(c("X", "X.1", "X.2")))
+
+  # country name standardisation
+  # v2 bug: the South Georgia entry was written as a single unnamed string inside c()
+  # ("South Georgia and the South Sandwich Islands = S. Georgia and Sandwich Is.")
+  # str_replace_all ignores unnamed elements, so no substitution occurred.
+  # Fixed: split into pattern = replacement as a proper named vector entry.
+  meta[[i]]$country <- str_replace_all(meta[[i]]$country,
+    c("USA"                                         = "United States",
+      "Svalbard and Jan Mayen"                       = "Norway",
+      "Czech Republic"                               = "Czechia",
+      "Turkey"                                       = "Türkiye",
+      "South Georgia and the South Sandwich Islands" = "S. Georgia and Sandwich Is."))
+}
+```
+
+## Check duplicate samples
+```{r}
+for (i in 1:l.tre) {
+  print(length(which(duplicated(meta[[i]]$sample))))
+}
+```
+
+## Merge lists into one dataframe
+```{r}
+meta.all <- bind_rows(meta)
+```
+
+## Fix host: replace duck->mallard errors via sample_taxa_lookup_all
+```{r}
+taxa.lookup <- read.csv(paste0(f.in.annot, "sample_taxa_lookup_all.csv"))
+
+# join on sample; common is the corrected common name (fixed in 06_host/mallard_duck_fix.Rmd)
+meta.all <- left_join(meta.all, taxa.lookup, by = "sample")
+
+# replace the buggy host column with the corrected common name
+meta.all$host.raw <- meta.all$host  # preserve original
+meta.all$host     <- meta.all$common
+
+# samples missing from taxa.lookup would get host=NA — catch this before proceeding
+n.unmatched <- sum(is.na(meta.all$host) & !is.na(meta.all$host.raw))
+if (n.unmatched > 0) warning(n.unmatched, " samples had no taxa.lookup match; host set to NA")
+n.changed <- sum(meta.all$host.raw != meta.all$host, na.rm = T)
+cat("Samples with host name corrected:", n.changed, "\n")
+
+# a few hosts are recorded under a Latin/scientific name instead of a common name; swap them
+# for the common name from latin_common_fix.txt. Block format: common name line, then Latin
+# line, blank-separated. Matched case-insensitively so e.g. "Calidris tenuirostris" hits.
+fix.raw      <- readLines("latin_common_fix.txt")
+fix.raw      <- fix.raw[fix.raw != ""]
+latin.common <- data.frame(common = fix.raw[c(T, F)],
+                           latin  = fix.raw[c(F, T)],
+                           stringsAsFactors = F)
+mi <- match(tolower(meta.all$host), tolower(latin.common$latin))
+meta.all$host[!is.na(mi)] <- latin.common$common[mi[!is.na(mi)]]
+cat("Hosts renamed Latin->common:", sum(!is.na(mi)), "rows;",
+    n_distinct(latin.common$latin[mi[!is.na(mi)]]), "distinct names\n")
+
+# merge common-name synonyms / spelling variants that map to the same species onto the most-
+# sampled name (host_common_merge.csv, from -> to; canonical chosen by dataset sample count).
+# This collapses e.g. "Cougar" -> "Mountain lion". TODO: the canonical names should be adopted
+# upstream in the 06_host taxonomy lookup in a future build (see readme) — done here locally so
+# the summary plots/tables and reported unique-host counts are deduplicated now.
+host.merge <- read.csv("host_common_merge.csv")
+mm <- match(meta.all$host, host.merge$from)
+meta.all$host[!is.na(mm)] <- host.merge$to[mm[!is.na(mm)]]
+cat("Common-name synonyms merged:", sum(!is.na(mm)), "rows;",
+    n_distinct(host.merge$from[mm[!is.na(mm)]]), "names\n")
+```
+
+## Fill in subtypes and H5 clades from phylogenetic nearest-neighbour algorithm
+FLAG: the fill-in (phylo/03_clusters/subtype_clades/plot_fill_subtypes_v2.Rmd) only fills
+MISSING N types (NA tree) and H5 clades (HA tree); existing labels are never changed. Tips whose
+label disagrees with the clade they are nested in on the tree (e.g. an N3/N8 inside the N1 clade,
+or an EA_nonGsGD-labelled tip nested inside 2.3.4.4b) were NOT corrected, and the flagging code in
+that script is commented out/unrun. These mismatched labels are carried as-is into every subtype
+and clade plot below, and blank tips next to them may have inherited a wrong label from their
+nearest labelled neighbour.
+```{r}
+fill.sub <- read.csv(f.in.fill)
+stopifnot(!anyDuplicated(fill.sub$sample))
+
+# The fill file's `subtype` column still contains the original blank/"H5"-only values for
+# samples that couldn't be typed from accession metadata alone. The authoritative filled
+# value is N_type (e.g. "N1"), so reconstruct the full label as paste0("H5", N_type).
+# Fall back to the raw subtype string only where N_type is genuinely missing.
+fill.sub <- fill.sub %>%
+  mutate(subtype_fill = if_else(!is.na(N_type), paste0("H5", N_type), subtype)) %>%
+  select(sample, subtype_fill, clade_fill = clade, N_type)
+
+meta.all <- left_join(meta.all, fill.sub, by = "sample")
+
+# filled-in clade must be complete: every sample matched and no blank clade
+stopifnot(all(meta.all$sample %in% fill.sub$sample))
+stopifnot(!any(is.na(meta.all$clade_fill) | meta.all$clade_fill == ""))
+
+meta.all$subtype.raw <- meta.all$subtype
+
+# also recover subtypes that were blank in raw metadata but present in the genotype col
+subtype.from.raw <- if_else(
+  meta.all$subtype.raw == "" | is.na(meta.all$subtype.raw),
+  meta.all$genotype,
+  meta.all$subtype.raw)
+
+# priority: paste0("H5", N_type) fill > genotype-col fallback > raw subtype string
+meta.all$subtype <- coalesce(meta.all$subtype_fill, subtype.from.raw)
+
+cat("Subtypes provided by fill file:", sum(!is.na(meta.all$subtype_fill)), "\n")
+cat("Remaining blank after fill:    ", sum(meta.all$subtype == "" | is.na(meta.all$subtype)), "\n")
+cat("Remaining H5-only after fill:  ", sum(meta.all$subtype == "H5", na.rm = T), "\n")
+cat("Distinct filled H5 clades:     ", n_distinct(meta.all$clade_fill), "\n")
+```
+
+# Dataset date range and earliest/latest samples
+```{r date-range}
+# One row per sample: collection_date/subtype/location are sample-level (identical across the 8 segment rows).
+# Order by dec.date (decimal date used for the temporal/phylo analysis): it is populated for every sample,
+# including year-only collection_dates, so it gives a robust earliest/latest even at partial date precision.
+samp <- meta.all %>%
+  distinct(sample,.keep_all = TRUE) %>%
+  select(sample,subtype,location,country,region,continent,collection_date,dec.date)
+
+date.range <- samp %>%
+  summarise(n_samples        = n(),
+            earliest_year    = floor(min(dec.date,na.rm = TRUE)),
+            latest_year      = floor(max(dec.date,na.rm = TRUE)),
+            earliest_decdate = min(dec.date,na.rm = TRUE),
+            latest_decdate   = max(dec.date,na.rm = TRUE))
+print(date.range)
+
+earliest.samp <- samp %>% filter(dec.date == min(dec.date,na.rm = TRUE))
+latest.samp   <- samp %>% filter(dec.date == max(dec.date,na.rm = TRUE))
+
+cat("\n--- Earliest sample(s) ---\n")
+earliest.samp %>% select(sample,subtype,country,region,location,collection_date,dec.date) %>% print()
+cat("\n--- Latest sample(s) ---\n")
+latest.samp %>% select(sample,subtype,country,region,location,collection_date,dec.date) %>% print()
+
+# save range and the extreme samples
+write.csv(date.range,paste0(f.out,"dataset_date_range.csv"),row.names = FALSE)
+write.csv(bind_rows(earliest = earliest.samp,latest = latest.samp,.id = "extreme"),
+          paste0(f.out,"earliest_latest_samples.csv"),row.names = FALSE)
+
+#oceanie
+oc<-samp %>% 
+  filter(region=="Oceania")
+table(oc$subtype, oc$collection_date)
+oc[which(oc$collection_date=="2024-03-06"),]
+#whyy is there a sequence of H5N1 from Australia in 2024.. EPI_ISL_19156871 lookup shows
+# A/Victoria/149/2024 (EPI_ISL_19156871): human host, clade 2.3.2.1a, collected 2024-03-06.
+# This is Australia's first human H5N1 case: a 2.5-year-old who became ill while visiting
+# Kolkata, India (Feb 12-29, 2024) and was hospitalised in Melbourne on return. i.e. an imported
+# travel-associated infection, not local H5N1 circulation in Australia -> genuine record, keep.
+# Virus is a reassortant: HA, NA, NP, NS closest to clade 2.3.2.1a from Bangladesh; other
+# segments from 2.3.4.4b and wild-bird LPAI.
+# Citation: Deng Y-M, Wille M, Dapat C, Xie R, Lay O, Peck H, Daley AJ, Dhanasakeran V, Barr IG.
+# Influenza A(H5N1) virus clade 2.3.2.1a in traveler returning to Australia from India, 2024.
+# Emerg Infect Dis. 2025;31(1):135-138. doi:10.3201/eid3101.241210 (names this isolate + EPI_ISL)
+```
+
+# Summary plots of clean nucleotide sequence metadata
+## Setup plot colors
+```{r}
+segment.cols <- natparks.pals(name = "Yellowstone", n = length(segments))
+segment.cols <- segment.cols[c(1, 5, 2, 4, 6, 3, 8, 7)]
+names(segment.cols) <- segments
+
+sub.count <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(subtype) %>%
+  count() %>% as.data.frame()
+subtype.freq <- sub.count$subtype[order(sub.count$n, decreasing = T)]
+# palette sized to subtype.freq, not unique(meta.all$subtype): the latter includes all 8 segment
+# rows per sample and any residual NAs, causing more colours than names -> silent misassignment.
+# Colours are still assigned in frequency order (same colours as v3)
+subtype.cols <- natparks.pals(name = "Olympic", n = length(subtype.freq))
+names(subtype.cols) <- subtype.freq
+# factor / legend / stacking order: alphanumeric (H5N1, H5N2, ... H5N9)
+subtype.ord <- mixedsort(subtype.freq)
+```
+
+## Setup H5 clade colors
+```{r}
+# Order clades alphanumerically by nomenclature hierarchy: 0, then the non-GsGD lineages
+# (Am_nonGsGD, EA_nonGsGD), then 1, 1.1, ..., 2.3.4, 2.3.4.4, 2.3.4.4b, ..., 9. Pad each
+# dot-separated level to 3 digits (keeping any letter suffix) so a string sort puts parents
+# before children and 2.3.4.4 before 2.3.4.4b. This order is used for the factor levels
+# (stacking), legends and colour shading in every clade plot.
+clade.key <- function(x) {
+  sapply(x, function(cl) {
+    if (!grepl("^[0-9]", cl)) return(paste0("000_", cl))  # non-GsGD sort right after "0" (key "000")
+    parts <- strsplit(cl, ".", fixed = T)[[1]]
+    paste(sprintf("%03d%s", as.integer(str_extract(parts, "^[0-9]+")),
+                  str_remove(parts, "^[0-9]+")), collapse = ".")
+  }, USE.NAMES = F)
+}
+clade.ord <- sort(unique(meta.all$clade_fill))
+clade.ord <- clade.ord[order(clade.key(clade.ord))]
+
+# 54 clades is too many for one interpolated qualitative palette (neighbours become a gradient),
+# so colour hierarchically: each major lineage gets a distinct base hue (NatParks colours) and its
+# sub-clades are light->dark shades of it, in clade.ord order. Base hues are restricted to reds,
+# blues, purples and greys (no greens/yellows) so clade colours don't overlap with the subtype
+# palette (Olympic greens/yellows).
+# TODO (future): coordinate the subtype and clade palettes so co-occurring labels share a similar
+# shade (e.g. H5N1 and 2.3.4.4b). More involved: would need a subtype<->clade mapping.
+clade.family <- function(cl) {
+  case_when(grepl("nonGsGD", cl)        ~ "nonGsGD",
+            grepl("^2\\.3\\.4\\.4", cl) ~ "2.3.4.4",
+            grepl("^2\\.3\\.4", cl)     ~ "2.3.4",
+            grepl("^2\\.3\\.2", cl)     ~ "2.3.2",
+            grepl("^2\\.2", cl)         ~ "2.2",
+            grepl("^2\\.1", cl)         ~ "2.1",
+            grepl("^2", cl)             ~ "2 other",
+            grepl("^[01]($|\\.)", cl)   ~ "0-1",
+            TRUE                        ~ "3-9")
+}
+family.base <- c("0-1"     = "#213958",  # Triglav navy
+                 "2.1"     = "#8087AA",  # Acadia periwinkle
+                 "2.2"     = "#B47E83",  # DeathValley mauve
+                 "2.3.2"   = "#8C2B0E",  # DeathValley rust
+                 "2 other" = "#E9988C",  # Torres salmon
+                 "2.3.4"   = "#386EC2",  # Triglav blue
+                 "2.3.4.4" = "#E23B0E",  # Charmonix red
+                 "3-9"     = "#7F4B89",  # Arches2 purple
+                 "nonGsGD" = "#616571")  # Banff grey
+shade.family <- function(base, k) {
+  if (k == 1) return(base)
+  ramp <- colorRampPalette(c("white", base, "black"))(101)
+  ramp[round(seq(30, 72, length.out = k))]
+}
+clade.fam  <- clade.family(clade.ord)
+clade.cols <- setNames(character(length(clade.ord)), clade.ord)
+for (f in unique(clade.fam)) {
+  clade.cols[clade.fam == f] <- shade.family(family.base[[f]], sum(clade.fam == f))
+}
+write.csv(data.frame(clade = clade.ord, family = clade.fam, color = unname(clade.cols)),
+          paste0(f.out, "h5_clade_colors.csv"), row.names = F)
+
+# shared legend bits for the clade plots (54 keys -> 18 rows x 3 columns, small keys)
+clade.leg       <- guides(fill = guide_legend(nrow = 18, byrow = F))
+clade.key.theme <- theme(legend.key.size = unit(0.3, "cm"),
+                         legend.text = element_text(size = 6),
+                         legend.spacing.x = unit(0.1, "cm"))
+```
+
+## Plot N nucleotide sequences by segment, over time
+```{r}
+# NA segment name would read as NA (missing) — set to string
+meta.all$segment[which(is.na(meta.all$segment))] <- "NA"
+meta.all$segment <- factor(meta.all$segment, levels = segments)
+meta.all.count   <- meta.all %>% dplyr::group_by(segment) %>% count()
+meta.all.count$segment <- factor(meta.all.count$segment, levels = segments)
+
+ggplot(meta.all) +
+  geom_bar(aes(x = segment, fill = segment)) +
+  geom_text(data = meta.all.count, aes(x = segment, label = paste0("n=", n), y = -4),
+            vjust = 1.3, size = 2) +
+  labs(y = "# clean nucleotide sequences", x = "Segment") +
+  scale_fill_manual(values = segment.cols) +
+  plot.theme +
+  theme(legend.position = "none")
+ggsave(paste0(f.out, "n.clean.seq.byseg.png"), height = 3, width = 4)
+
+ggplot(meta.all) +
+  geom_bar(aes(x = collection_year, fill = segment)) +
+  scale_x_continuous(breaks = seq(1960, 2025, by = 5), expand = c(0, 0)) +
+  labs(y = "# clean nucleotide sequences", x = "Collection year", fill = "Segment") +
+  scale_fill_manual(values = segment.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "n.clean.seq.byseg.bycolldate.png"), height = 4, width = 8)
+
+meta.all %>%
+  filter(as.numeric(collection_year) >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = collection_year, fill = segment)) +
+  scale_x_continuous(breaks = seq(2000, 2025, by = 5), expand = c(0, 0)) +
+  labs(y = "# clean nucleotide sequences", x = "Collection year", fill = "Segment") +
+  scale_fill_manual(values = segment.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "n.clean.seq.byseg.bycolldate.1996.png"), height = 4, width = 6)
+
+p.h5yr.1996 <- meta.all %>%
+  filter(segment == "HA") %>%
+  filter(as.numeric(collection_year) >= 1996) %>%
+  ggplot() +
+  # geom_bar(aes(x = collection_year, fill = segment)) +
+  geom_bar(aes(x = collection_year), fill = "grey30") +
+  geom_text(stat = "count", aes(x = collection_year, label = after_stat(count)),
+            vjust = -0.4, size= 1.4) +
+  scale_x_continuous(breaks = seq(2000, 2025, by = 5), expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Collection year") +
+  scale_fill_manual(values = segment.cols) +
+  plot.theme.date +
+  theme(legend.position = "none")
+ggsave(paste0(f.out, "n.clean.samp.bycolldate.1996.png"), plot = p.h5yr.1996, height = 4, width = 6)
+
+p.h5yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  ggplot() +
+  geom_bar(aes(x = collection_year), fill="grey30") +
+  geom_text(stat = "count", aes(x = collection_year, label = after_stat(count)),
+            vjust = -0.4, size= 1.4) +
+  scale_x_continuous(breaks = c(seq(1960, 2025, by = 5), 1996),
+                     labels = function(x) ifelse(x == 1996, "*", as.character(x)),
+                     expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Collection year") +
+  scale_fill_manual(values = segment.cols) +
+  plot.theme.date +
+  theme(legend.position = "none")
+ggsave(paste0(f.out, "n.clean.samp.bycolldate.png"), plot = p.h5yr, height = 4, width = 8)
+
+meta.all %>%
+  filter(segment == "HA") %>%
+  ggplot() +
+  geom_bar(aes(x = collection_year), fill="grey30") +
+  geom_text(stat = "count", aes(x = collection_year, label = after_stat(count)),
+            vjust = -0.4, size= 1.4) +
+  scale_x_continuous(breaks = c(seq(1960, 2025, by = 5), 1996),
+                     labels = function(x) ifelse(x == 1996, "*", as.character(x)),
+                     expand = c(0, 0)) +
+  scale_y_log10() +
+  labs(y = "N H5Nx samples (log10)", x = "Collection year") +
+  scale_fill_manual(values = segment.cols) +
+  plot.theme.date +
+  theme(legend.position = "none")
+ggsave(paste0(f.out, "n.clean.samp.bycolldate.log.png"), height = 4, width = 8)
+```
+
+## Plot N nucleotide seqs by host
+```{r}
+host.count.yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(host, collection_year) %>%
+  count() %>% as.data.frame()
+host.count <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(host) %>%
+  count() %>% as.data.frame()
+host.ord <- host.count$host[order(host.count$n, decreasing = T)]
+host.count.yr$host           <- factor(host.count.yr$host, levels = host.ord)
+host.count.yr$collection_year <- as.numeric(host.count.yr$collection_year)
+
+Most    <- host.count$host[which(host.count$n>=50)]
+Most100 <- host.count$host[which(host.count$n>=100)]
+Less    <- host.count$host[which(host.count$n>=10)]
+
+p1<-host.count.yr %>%
+  filter(host %in% Less) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=10)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        axis.text.x=element_text(size=rel(0.8)))
+p1
+ggsave(paste0(f.out, "n.clean.samp.host.year.10.png"), height = 4, width = 13)
+
+host.count.yr %>%
+  filter(host %in% Most) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=50)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))+
+  guides(fill = guide_colorbar(title.position = "left"))
+ggsave(paste0(f.out, "n.clean.samp.host.year.50.png"), height = 4, width = 10)
+
+#only those with <50 samples:
+host.count.yr %>%
+  filter(!host %in% Most) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N<50)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        axis.text.x=element_text(size=rel(0.8)))+
+  guides(fill = guide_colorbar(title.position = "left"))
+ggsave(paste0(f.out, "n.clean.samp.host.year.less50.png"), height = 4, width = 10)
+
+host.count.yr %>%
+  filter(host %in% Most) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=50)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.host.year.50.1996.png"), height = 3.3, width = 11)
+
+host.count.yr %>%
+  filter(host %in% Most) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=50)", fill = "Collection year", x = "Host") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.host.year.50.1996.short.png"), height = 2.5, width = 11)
+
+host.count.yr %>%
+  filter(host %in% Most100) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=100)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.host.year.100.1996.png"), height = 3.3, width = 8)
+
+p.host100.1996 <- host.count.yr %>%
+  filter(host %in% Most100) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=100)", fill = "Collection year", x = "Host") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.99, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.host.year.100.1996.short.png"), plot = p.host100.1996, height = 2.5, width = 7)
+
+p.host100.noleg <- host.count.yr %>%
+  filter(host %in% Most100) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=100)", fill = "Collection year", x = "Host") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.host.year.100.png"), plot = p.host100.noleg, height = 2.5, width = 7)
+
+host.count.yr %>%
+  filter(host %in% Less) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N>=10)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.host.year.10.1996.png"), height = 4, width = 20)
+
+#less than 10
+p2<-host.count.yr %>%
+  filter(!host %in% Less) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples (N<10)", x = "Host", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        axis.text.x=element_text(size=rel(0.6)))+
+  scale_y_continuous(breaks=seq(0,10,1))
+p2
+ggsave(paste0(f.out, "n.clean.samp.host.year.less10.png"), height = 4, width = 25)
+```
+## Make a compositie plot of all hosts more than 10, less than 10 bottom:
+```{r}
+plot_grid(p1, p2+theme(legend.position = "none"), nrow=2, labels=c("A","B"), align="hv")
+ggsave(paste0(f.out, "n.clean.samp.host.year.more10.less10.png"),
+       height = 11, width = 32, dpi = 300, limitsize = FALSE)
+```
+
+## Plot N nucleotide seqs by country
+```{r}
+country.count.yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(country, collection_year) %>%
+  count() %>% as.data.frame()
+country.count <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(country) %>%
+  count() %>% as.data.frame()
+country.ord <- country.count$country[order(country.count$n, decreasing = T)]
+country.count.yr$country        <- factor(country.count.yr$country, levels = country.ord)
+country.count.yr$collection_year <- as.numeric(country.count.yr$collection_year)
+# v3 bug: thresholds used $N (column is n) -> NULL -> empty country plots
+most.c <- country.count$country[which(country.count$n>=50)]
+less.c <- country.count$country[which(country.count$n>=10)]
+
+country.count.yr %>%
+  filter(country %in% less.c) %>%
+  ggplot() +
+  geom_bar(aes(x = country, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples,\nfor country with >=10 samples", x = "Country", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.country.year.10.png"), height = 4, width = 12)
+
+country.count.yr %>%
+  filter(country %in% most.c) %>%
+  ggplot() +
+  geom_bar(aes(x = country, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples,\nfor country with >=50 samples", x = "Country", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.country.year.50.png"), height = 4, width = 8)
+
+country.count.yr %>%
+  filter(country %in% less.c) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = country, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples,\nfor country with >=10 samples", x = "Country", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.country.year.10.1996.png"), height = 5, width = 12)
+
+country.count.yr %>%
+  filter(country %in% less.c) %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = country, y = log(n), fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "log (N H5Nx samples,\nfor country with >=10 samples)", x = "Country", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+
+ggsave(paste0(f.out, "n.clean.samp.country.year.10.1996.log.png"), height = 5, width = 12)
+```
+
+## Plot N nucleotide seqs by global region
+```{r}
+region.count.yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(region, collection_year) %>%
+  count() %>% as.data.frame()
+region.count <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(region) %>%
+  count() %>% as.data.frame()
+region.ord <- region.count$region[order(region.count$n, decreasing = T)]
+region.count.yr$region        <- factor(region.count.yr$region, levels = region.ord)
+region.count.yr$collection_year <- as.numeric(region.count.yr$collection_year)
+
+p.region <- region.count.yr %>%
+  ggplot() +
+  geom_bar(aes(x = region, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Global region", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+
+ggsave(paste0(f.out, "n.clean.samp.region.year.png"), plot = p.region, height = 4, width = 12)
+
+p.region.1996 <- region.count.yr %>%
+  filter(collection_year >= 1996) %>%
+  filter(!is.na(region)) %>%
+  ggplot() +
+  geom_bar(aes(x = region, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Global region", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.region.year.1996.png"), plot = p.region.1996, height = 3, width = 5)
+
+region.count.yr %>%
+  filter(collection_year >= 2020) %>%
+  filter(!is.na(region)) %>%
+  ggplot() +
+  geom_bar(aes(x = region, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "# clean H5Nx sample", x = "Global region", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.region.year.2020.png"), height = 5, width = 8)
+```
+
+## Facet by continent, bars by host
+```{r}
+meta.all$continent <- str_replace_all(meta.all$continent,
+  c("South America" = "Americas", "North America" = "Americas"))
+
+host.continent.count.yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(host, continent, collection_year) %>%
+  count() %>% as.data.frame()
+host.continent.count.yr$collection_year <- as.numeric(host.continent.count.yr$collection_year)
+host.continent.count.yr$continent <- factor(host.continent.count.yr$continent,
+  levels = c("Americas", "Asia", "Antarctica", "Europe", "Africa", "Oceania"))
+
+host.continent.count.yr %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = host, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = NULL, fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = "top",
+        legend.key.width = unit(2.5, "cm"),
+        axis.text.x = element_text(size = 6)) +
+  facet_wrap(~continent, scales = "free") +
+  force_panelsizes(rows = c(1, 1), cols = c(2.4, 0.8, 0.1))
+ggsave(paste0(f.out, "n.clean.samp.FacetWrap-continent.host.year.1996.png"),
+       height = 8, width = 24)
+```
+
+## N samples by subtype
+```{r}
+subtype.count.yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(subtype, collection_year) %>%
+  count() %>% as.data.frame()
+subtype.count.yr$subtype        <- factor(subtype.count.yr$subtype, levels = subtype.ord)
+subtype.count.yr$collection_year <- as.numeric(subtype.count.yr$collection_year)
+
+subtype.count.yr %>%
+  ggplot() +
+  geom_bar(aes(x = subtype, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Subtype", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.subtype.year.png"), height = 4, width = 8)
+
+subtype.count.yr %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = subtype, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Subtype", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.subtype.year.1996.png"), height = 4, width = 8)
+
+subtype.count.yr %>%
+  filter(collection_year >= 2012) %>%
+  ggplot() +
+  geom_bar(aes(x = subtype, y = n, fill = collection_year), stat = "identity") +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(y = "N H5Nx samples", x = "Subtype", fill = "Collection year") +
+  scale_fill_viridis_c(option = "inferno", direction = -1) +
+  plot.theme.date +
+  theme(legend.position = c(0.9, 0.5),
+        legend.justification = c(1,0.5),
+        
+        axis.text.x=element_text(size=rel(0.8)))
+ggsave(paste0(f.out, "n.clean.samp.subtype.year.2012.png"), height = 4, width = 8)
+
+subtype.count.yr %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = n, fill = subtype),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(breaks = as.character(seq(2000, 2025, by = 5)), expand = c(0, 0)) +
+  labs(y = "# samples by subtype per year", x = "Collection year", fill = "Subtype") +
+  scale_fill_manual(values = subtype.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "n.clean.samp.bysub.year.1996.png"), height = 4, width = 8)
+
+Count.yr.2 <- subtype.count.yr %>% group_by(collection_year) %>% summarize(n_year = sum(n))
+subtype.count.yr.2 <- left_join(subtype.count.yr, Count.yr.2, by = "collection_year") %>%
+  mutate(prop = n / n_year)
+
+p.prop.sub.1996 <- subtype.count.yr.2 %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = prop, fill = subtype),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(breaks = as.character(seq(2000, 2025, by = 5)), expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "Subtype") +
+  scale_fill_manual(values = subtype.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "prop.clean.samp.bysub.year.1996.png"), plot = p.prop.sub.1996, height = 3, width = 6)
+
+p.prop.sub <- subtype.count.yr.2 %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = prop, fill = subtype),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(limits = as.character(1961:2025),
+                   breaks = as.character(seq(1960, 2025, by = 5)),
+                   expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "Subtype") +
+  scale_fill_manual(values = subtype.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "prop.clean.samp.bysub.year.png"), plot = p.prop.sub, height = 3, width = 12)
+
+subtype.count.yr.2 %>%
+  filter(collection_year >= 2014) %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = prop, fill = subtype),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(breaks = as.character(seq(2000, 2025, by = 5)), expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "Subtype") +
+  scale_fill_manual(values = subtype.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "prop.clean.samp.bysub.year.2014.png"), height = 4, width = 6)
+
+# smoothed proportional stacked density (sums to 1 at every year): per-subtype KDE of collection
+# year weighted by count, stacked with position = "fill". bw = 1 year
+sub.dens <- meta.all %>%
+  filter(segment == "HA") %>%
+  mutate(subtype = factor(subtype, levels = subtype.ord),
+         collection_year = as.numeric(collection_year))
+
+p.dens.sub <- sub.dens %>%
+  ggplot() +
+  geom_density(aes(x = collection_year, y = after_stat(count), fill = subtype),
+               position = "fill", bw = 1, colour = NA) +
+  scale_x_continuous(breaks = seq(1960, 2025, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "Subtype") +
+  scale_fill_manual(values = subtype.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "dens.clean.samp.bysub.year.png"), plot = p.dens.sub, height = 3, width = 12)
+
+p.dens.sub.1996 <- sub.dens %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_density(aes(x = collection_year, y = after_stat(count), fill = subtype),
+               position = "fill", bw = 1, colour = NA) +
+  scale_x_continuous(breaks = seq(2000, 2025, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "Subtype") +
+  scale_fill_manual(values = subtype.cols) +
+  plot.theme.date
+ggsave(paste0(f.out, "dens.clean.samp.bysub.year.1996.png"), plot = p.dens.sub.1996, height = 3, width = 6)
+```
+
+## N samples by H5 clade
+Same plot set as subtype through time, using the phylogenetically filled-in H5 (HA) clade
+(`clade_fill`; complete, no NAs). Full date range and 1996+; no `*` date ticks.
+```{r}
+clade.count.yr <- meta.all %>%
+  filter(segment == "HA") %>%
+  dplyr::group_by(clade_fill, collection_year) %>%
+  count() %>% as.data.frame() %>%
+  group_by(collection_year) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(clade_fill = factor(clade_fill, levels = clade.ord),
+         collection_year = as.numeric(collection_year))
+write.csv(clade.count.yr, paste0(f.out, "n.clean.samp.byclade.year.csv"), row.names = F)
+
+# every year in the data range, so years with no samples show as blank gaps (as for subtype)
+yr.all <- as.character(seq(min(clade.count.yr$collection_year), max(clade.count.yr$collection_year)))
+
+# proportion by year
+p.prop.clade <- clade.count.yr %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = prop, fill = clade_fill),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(limits = yr.all,
+                   breaks = as.character(seq(1960, 2025, by = 5)),
+                   expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "H5 clade") +
+  scale_fill_manual(values = clade.cols) +
+  plot.theme.date + clade.leg + clade.key.theme
+ggsave(paste0(f.out, "prop.clean.samp.byclade.year.png"), plot = p.prop.clade, height = 3, width = 12)
+
+p.prop.clade.1996 <- clade.count.yr %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = prop, fill = clade_fill),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(breaks = as.character(seq(2000, 2025, by = 5)), expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "H5 clade") +
+  scale_fill_manual(values = clade.cols) +
+  plot.theme.date + clade.leg + clade.key.theme
+ggsave(paste0(f.out, "prop.clean.samp.byclade.year.1996.png"), plot = p.prop.clade.1996, height = 3, width = 6)
+
+# N samples by year, stacked by clade
+p.n.clade <- clade.count.yr %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = n, fill = clade_fill),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(limits = yr.all,
+                   breaks = as.character(seq(1960, 2025, by = 5)),
+                   expand = c(0, 0)) +
+  labs(y = "# samples by H5 clade per year", x = "Collection year", fill = "H5 clade") +
+  scale_fill_manual(values = clade.cols) +
+  plot.theme.date + clade.leg + clade.key.theme
+ggsave(paste0(f.out, "n.clean.samp.byclade.year.png"), plot = p.n.clade, height = 4, width = 12)
+
+p.n.clade.1996 <- clade.count.yr %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(collection_year), y = n, fill = clade_fill),
+           stat = "identity", position = "stack") +
+  scale_x_discrete(breaks = as.character(seq(2000, 2025, by = 5)), expand = c(0, 0)) +
+  labs(y = "# samples by H5 clade per year", x = "Collection year", fill = "H5 clade") +
+  scale_fill_manual(values = clade.cols) +
+  plot.theme.date + clade.leg + clade.key.theme
+ggsave(paste0(f.out, "n.clean.samp.byclade.year.1996.png"), plot = p.n.clade.1996, height = 4, width = 8)
+
+# smoothed proportional stacked density (sums to 1), as for subtype
+clade.dens <- meta.all %>%
+  filter(segment == "HA") %>%
+  mutate(clade_fill = factor(clade_fill, levels = clade.ord),
+         collection_year = as.numeric(collection_year))
+
+p.dens.clade <- clade.dens %>%
+  ggplot() +
+  geom_density(aes(x = collection_year, y = after_stat(count), fill = clade_fill),
+               position = "fill", bw = 1, colour = NA) +
+  scale_x_continuous(breaks = seq(1960, 2025, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "H5 clade") +
+  scale_fill_manual(values = clade.cols) +
+  plot.theme.date + clade.leg + clade.key.theme
+ggsave(paste0(f.out, "dens.clean.samp.byclade.year.png"), plot = p.dens.clade, height = 3, width = 12)
+
+p.dens.clade.1996 <- clade.dens %>%
+  filter(collection_year >= 1996) %>%
+  ggplot() +
+  geom_density(aes(x = collection_year, y = after_stat(count), fill = clade_fill),
+               position = "fill", bw = 1, colour = NA) +
+  scale_x_continuous(breaks = seq(2000, 2025, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(y = "Proportion samples", x = "Collection year", fill = "H5 clade") +
+  scale_fill_manual(values = clade.cols) +
+  plot.theme.date + clade.leg + clade.key.theme
+ggsave(paste0(f.out, "dens.clean.samp.byclade.year.1996.png"), plot = p.dens.clade.1996, height = 3, width = 6)
+```
+
+# Summarize trimmed alignments
+## Extract width, % ambiguous, % GC
+```{r}
+alpha.width <- replicate(n = l.tre, vector())
+
+for (i in 1:l.tre) {
+  alph     <- alphabetFrequency(nuc[[i]])
+  rownames(alph) <- names(nuc[[i]])
+  alph.df  <- alph %>% as.data.frame() %>% select(-c("-", "+", "."))
+  total.width <- max(width(nuc[[i]]))
+
+  df.out <- data.frame(
+    tip.label   = rownames(alph),
+    tot.width   = total.width,
+    n.nuc       = NA, perc.cov    = NA,
+    n.noambig   = NA, perc.noambig = NA,
+    n.gc        = NA, perc.gc     = NA,
+    perc.a = NA, perc.c = NA, perc.t = NA, perc.g = NA)
+
+  for (j in 1:nrow(alph.df)) {
+    df.out$n.nuc[j]   <- sum(alph.df[j,])
+    df.out$perc.cov[j] <- round((df.out$n.nuc[j] / total.width) * 100, digits = 2)
+    noambig              <- sum(alph.df[j, c("A", "T", "C", "G")])
+    df.out$n.noambig[j]  <- noambig
+    df.out$perc.noambig[j] <- round((noambig / total.width) * 100, digits = 2)
+    df.out$n.gc[j]    <- sum(alph.df[j, c("C", "G")])
+    df.out$perc.gc[j] <- round((df.out$n.gc[j] / noambig) * 100, digits = 2)
+    df.out$perc.a[j]  <- round((alph.df$A[j] / noambig) * 100, digits = 2)
+    df.out$perc.c[j]  <- round((alph.df$C[j] / noambig) * 100, digits = 2)
+    df.out$perc.t[j]  <- round((alph.df$T[j] / noambig) * 100, digits = 2)
+    df.out$perc.g[j]  <- round((alph.df$G[j] / noambig) * 100, digits = 2)
+  }
+
+  # extract segment name from filename instead of assuming index order (bug fix from v2)
+  df.out$segment <- str_extract(basename(fasta.in[i]), paste(segments, collapse = "|"))
+  alpha.width[[i]] <- df.out
+}
+
+alpha.width.all <- bind_rows(alpha.width)
+alpha.width.all$segment <- factor(alpha.width.all$segment, levels = segments)
+
+write.csv(alpha.width.all, paste0(f.out, "nuc.clean.align.summary.csv"))
+```
+
+## Plot coverage, GC content, ambiguity
+```{r}
+pl1 <- alpha.width.all %>%
+  ggplot() +
+  geom_point(aes(x = segment, y = perc.cov, color = segment), alpha = 0.1,
+             position = position_jitter(width = 0.4)) +
+  geom_violin(aes(x = segment, y = perc.cov), alpha = 0.7, scale = "width",
+              quantiles = 0.5, quantile.linetype = 1) +
+  scale_color_manual(values = segment.cols) +
+  labs(y = "Coverage (% no gaps)", x = "Segment") +
+  plot.theme +
+  theme(legend.position = "none")
+pl1
+ggsave(paste0(f.out, "clean.coverage.bysegment.png"), height = 4, width = 6)
+
+pl2 <- alpha.width.all %>%
+  ggplot() +
+  geom_point(aes(x = segment, y = n.nuc, color = segment), alpha = 0.1,
+             position = position_jitter(width = 0.4)) +
+  geom_violin(aes(x = segment, y = n.nuc), alpha = 0.7, scale = "width",
+              quantiles = 0.5, quantile.linetype = 1) +
+  scale_color_manual(values = segment.cols) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(y = "Width (n nucleotide)", x = "Segment") +
+  plot.theme +
+  theme(legend.position = "none")
+pl2
+ggsave(paste0(f.out, "clean.width.bysegment.png"), height = 4, width = 6)
+
+pl3 <- alpha.width.all %>%
+  ggplot() +
+  geom_point(aes(x = segment, y = perc.gc, color = segment), alpha = 0.1,
+             position = position_jitter(width = 0.4)) +
+  geom_violin(aes(x = segment, y = perc.gc), alpha = 0.7, scale = "width",
+              quantiles = 0.5, quantile.linetype = 1) +
+  scale_color_manual(values = segment.cols) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(y = "%GC", x = "Segment") +
+  plot.theme +
+  theme(legend.position = "none")
+pl3
+ggsave(paste0(f.out, "clean.percGC.bysegment.png"), height = 4, width = 6)
+
+pl4 <- alpha.width.all %>%
+  ggplot() +
+  geom_point(aes(x = segment, y = (1 - perc.noambig / 100) * 100, color = segment),
+             alpha = 0.1, position = position_jitter(width = 0.4)) +
+  geom_violin(aes(x = segment, y = (1 - perc.noambig / 100) * 100), alpha = 0.7,
+              scale = "width", quantiles = 0.5, quantile.linetype = 1) +
+  scale_color_manual(values = segment.cols) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(y = "% ambiguous", x = "Segment") +
+  plot.theme +
+  theme(legend.position = "none")
+pl4
+ggsave(paste0(f.out, "clean.ambig.bysegment.png"), height = 4, width = 6)
+
+plot_grid(pl1, pl2, pl3, pl4, nrow = 2, labels = LETTERS[1:4], align = "hv")
+ggsave(paste0(f.out, "Fig.cov.ambig.GC.bysegment.png"), height = 5, width = 6)
+```
+
+# Composite cowplot
+Figure numbering: the main summary composite is manuscript **Fig 2** and the full-date-range
+version is **Fig S2** (v3 code/text called them Fig 1 / Fig S1). Only the `_map` composites are
+output; the older region-barplot versions are commented out below.
+```{r}
+d_fix <- theme(axis.title.y = element_text(hjust = 0.5))
+m     <- theme(plot.margin = margin(1, 2, 1, 2))  # tight top/bottom -> less space between rows
+tag   <- theme(plot.tag = element_text(size = 14, face = "bold"))
+
+# bold legend titles in the composites
+leg.bold <- theme(legend.title = element_text(face = "bold", size = 12.5))  # +25% title size
+
+# collection-year panels (A, B, C): larger axis text + titles
+yr.txt <- theme(axis.text  = element_text(size = 10),
+                axis.title = element_text(size = 11, face = "bold"))
+
+# A, B, C are stacked with zero top/bottom margin. No "Collection year" axis title on any of
+# them; the year labels (axis text) are shown only under A. B and C keep the 5-year tick marks.
+m.stack  <- theme(plot.margin = margin(0, 2, 0, 2))
+m.A      <- theme(plot.margin = margin(0, 2, 6, 2))  # small gap between A and B
+no.x.ttl <- theme(axis.title.x = element_blank())
+no.x.lab <- theme(axis.title.x = element_blank(),
+                  axis.text.x  = element_blank())
+no.leg   <- theme(legend.position = "none")
+leg.of   <- function(p, pos = "bottom") cowplot::get_plot_component(p, paste0("guide-box-", pos))
+
+
+# tags for the stacked panels sit in a left margin column (location "margin", position "left")
+# so they don't add a strip above each panel and break the touching stack
+tag.left <- theme(plot.tag.location = "margin", plot.tag.position = "left",
+                  plot.tag = element_text(size = 14, face = "bold", vjust = 1))
+# B and C: nudged down a little so the tag sits level with the legend title above the panel
+tag.left.leg <- theme(plot.tag.location = "margin", plot.tag.position = "left",
+                      plot.tag = element_text(size = 14, face = "bold", vjust = 1,
+                                              margin = margin(t = 2)))
+# tags for the wrapped right-hand panels (D host, E map): drawn in the top-left corner at a
+# numeric position, which reserves no space (a normal "topleft" tag on E adds a strip to the
+# top of its row, which also pushes C away from B)
+tag.corner <- theme(plot.tag.position = c(0.005, 0.995),
+                    plot.tag = element_text(size = 14, face = "bold", hjust = 0, vjust = 1))
+# "E" tag: level with the map legend title and just left of it, matching the tag-to-title gap in
+# B and C. The title starts ~11.5% across the trimmed map PNG (legend.margin left = 60 pt in
+# map_global_geno.Rmd), so the tag's right edge sits at x = 0.092 (hjust = 1). Re-tune if the
+# map legend margin changes.
+tag.E <- theme(plot.tag.position = c(0.092, 1.008),
+               plot.tag = element_text(size = 14, face = "bold", hjust = 1, vjust = 1))
+
+# subtype legend: ABOVE panel B, title above the keys (left-aligned), one row of tiles. Text and key size
+# match the H5 clade legend; both legends start just right of the tag column (no negative
+# margin, which made the "B" tag collide with the one-row legend title)
+sub.leg   <- theme(legend.position = "top",
+                   legend.justification = "left",
+                   legend.location = "plot",
+                   legend.margin = margin(2, 0, 2, 6),
+                   legend.key.spacing.x = unit(2, "pt"),
+                   legend.text = element_text(size = 9))
+sub.guide <- guides(fill = guide_legend(nrow = 1, title.position = "top", title.hjust = 0))
+sub.key   <- theme(legend.key.size = unit(0.32, "cm"))
+
+# H5 clade legend: ABOVE panel C, title above the keys (left-aligned, as subtype), 8 rows
+# (54 clades -> 7 columns, filled down the columns). It must fit inside the left column or it
+# runs under the map (E): at 9 pt text / 0.32 cm keys / 2 pt column spacing it is ~4.9 in wide
+# (7 rows would be ~5.6 in, too wide), vs ~5.3 in left column (widths = c(1.6, 2) on 12 in)
+clade.leg.comp <- list(
+  guides(fill = guide_legend(nrow = 8, byrow = F, title.position = "top", title.hjust = 0)),
+  theme(legend.position = "top",
+        legend.justification = "left",
+        legend.location = "plot",
+        legend.margin = margin(2, 0, 2, 6),
+        legend.key.spacing.x = unit(2, "pt"),
+        legend.text = element_text(size = 9),
+        legend.key.size = unit(0.32, "cm")))
+
+# host panel (D): larger collection-year colourbar, legend text/title and host (x axis) labels.
+# Colourbar length is 5x key height, so keep key height modest or the bar overflows the panel
+host.leg <- theme(legend.key.height = unit(0.42, "cm"),
+                  legend.key.width  = unit(0.55, "cm"),
+                  legend.text  = element_text(size = 9),   # same size as B / C legends
+                  legend.title = element_text(size = 12.5, face = "bold"),  # same as B / C
+                  axis.text.x  = element_text(size = 8, angle = 60, hjust = 1, vjust = 1))
+# top room for the D tag; wide left margin opens the gap from panel A and moves D's y-axis title
+# right, clear of the D tag
+m.host   <- theme(plot.margin = margin(16, 2, 1, 24))
+```
+
+## Map panel for composite
+Map panel (E) is a pre-rendered PNG from the map script in `05_annotate/05_compare_genotyping/`
+(outputs now in `2026-09-28_map/`, previously `2026-07-01_map/`; same filenames). Label fixes
+done upstream in the 2026-09-28 maps:
+
+* DONE: larger, bold region-label font
+* DONE: line breaks (`\n`) in multi-word labels so each centres over its region
+* OPTIONAL / not done: semi-transparent white background behind labels (e.g.
+  `geom_label(fill = alpha("white", 0.6), label.size = 0)` or `shadowtext`) if labels over dark
+  fills still read poorly
+```{r}
+# Pre-rendered global choropleth of N samples per region (2020-2025), generated in
+# 05_annotate/05_compare_genotyping/ (map_global_geno.Rmd). Read as a raster and wrap
+# in ggdraw() so it behaves as a ggplot panel inside the patchwork composites below.
+# This replaced the region barplot (p.region.1996 / p.region) in the *_map figures
+
+# Flatten transparency onto white and trim the uniform white border. We intentionally do
+# NOT crop the top band here — doing so clipped the compass rose / northern landmasses.
+# The wrap_elements(full=) + scale (below) handle fit, so the full projection stays intact.
+# In the composites p.map is wrapped in wrap_elements(full=) so it fills its whole grid
+# cell (no axis alignment). Within that large cell, scale < 1 sizes the map so the entire
+# projection + colorbar stay visible without spilling over the cell edges.
+# Raise toward 1 to enlarge, lower to add margin.
+map.png <- "../05_annotate/05_compare_genotyping/2026-09-28_map/map_n_samples_1996-2025_legend-top.png"
+
+map.img <- magick::image_read(map.png)
+map.img <- magick::image_flatten(magick::image_background(map.img, "white"))
+map.img <- magick::image_trim(map.img, fuzz = 5)
+# halign/valign pin the map to the top-left of its cell so its legend title (the top-most
+# element of the trimmed image) sits at a known spot for the "E" tag (tag.E, below)
+p.map   <- ggdraw() + draw_image(map.img, scale = 1.0, halign = 0, valign = 1)
+
+# map for the full range of sample dates
+map.full.png <- "../05_annotate/05_compare_genotyping/2026-09-28_map/map_n_samples_all-dates_legend-top.png"
+map.img.full <- magick::image_read(map.full.png)
+map.img.full <- magick::image_flatten(magick::image_background(map.img.full, "white"))
+map.img.full <- magick::image_trim(map.img.full, fuzz = 5)
+p.map.full   <- ggdraw() + draw_image(map.img.full, scale = 1.0, halign = 0, valign = 1)
+```
+
+## Fig 2 (old region-barplot version, not output)
+```{r}
+# superseded by the _map composite below; kept for reference
+# fig2 <- (p.h5yr.1996 + m + tag | p.prop.sub.1996 + m + tag) /
+#         (p.region.1996 + m + tag | p.host100.1996 + d_fix + m + tag) +
+#   plot_layout(widths = c(1, 3)) +
+#   plot_annotation(tag_levels = "A")
+# ggsave(paste0(f.out, "Fig2_summary_1996.png"), plot = fig2,
+#        width = 13, height = 7, dpi = 300, bg = "white")
+```
+
+## Fig 2 (map): main summary (1996+)
+```{r}
+# Layout (design grid, left column narrow):
+#   A year-count (+ year labels)  | D host  (D wrapped: rows 1-2)
+#   (subtype legend) B subtype density | D
+#   B (cont.)                     | E map   (E wrapped: rows 3-4)
+#   (clade legend) C H5 clade density  | E
+# Panel heights A:B:C = 1:1.5:1.5 (B spans rows 2-3 = 1.05 + 0.45, giving D more height; legends/axes are added on top
+# of these). Splitting B's row lets E (map) take more height than D. Year labels only under A;
+# small gap under A (m.A). D and E are wrap_elements() so they don't align axes with the left
+# column (D's tall host labels otherwise stretch the row's axis strip).
+fig.design <- "AD\nBD\nBE\nCE"
+
+# panel A: drop the per-bar count labels (geom_text) — too small to read at composite size.
+# The standalone n.clean.samp.bycolldate.1996.png keeps them.
+p.h5yr.1996.nolab <- p.h5yr.1996
+p.h5yr.1996.nolab$layers <- Filter(function(l) !inherits(l$geom, "GeomText"), p.h5yr.1996.nolab$layers)
+
+# B and C are the smoothed proportional density plots (dens.clean.samp.by*.year.1996). Their x is
+# continuous and computed over the scale range, so give A, B, C the same limits (half a year past
+# the first/last year, where A's bars end) -> year axes line up and the density fills the width
+yr.max       <- max(as.numeric(meta.all$collection_year), na.rm = T)
+yr.lim.1996  <- c(1995.5, yr.max + 0.5)
+yr.scale.1996 <- scale_x_continuous(limits = yr.lim.1996, breaks = seq(2000, 2025, by = 5),
+                                    expand = c(0, 0))
+
+# density plots have no y padding, so where B/C touch the panel above their 1.00 / 0.00 labels
+# collide with its bottom label; pad y a little (like the barplots' default expansion)
+dens.y <- scale_y_continuous(expand = expansion(mult = 0.04))
+
+pB.1996 <- p.dens.sub.1996 + yr.scale.1996 + dens.y +
+  yr.txt + sub.leg + sub.guide + sub.key + leg.bold
+pC.1996 <- p.dens.clade.1996 + yr.scale.1996 + dens.y +
+  yr.txt + clade.leg.comp + leg.bold
+
+fig2.map <- (p.h5yr.1996.nolab + yr.scale.1996 + yr.txt + no.x.ttl + m.A + tag.left) +
+            (pB.1996 + labs(y = "Proportion samples") + no.x.lab + m.stack + tag.left.leg) +
+            (pC.1996 + labs(y = "Proportion samples") + no.x.lab + m.stack + tag.left.leg) +
+            (wrap_elements(full = p.host100.1996 + d_fix + host.leg + m.host) + tag.corner) +
+            (wrap_elements(full = p.map) + m + tag.E) +
+  plot_layout(design = fig.design, widths = c(1.6, 2), heights = c(1, 1.05, 0.45, 1.5)) +
+  plot_annotation(tag_levels = "A")
+ggsave(paste0(f.out, "Fig2_summary_1996_map.png"), plot = fig2.map,
+       width = 12, height = 8.1, dpi = 300, bg = "white")
+```
+
+## Fig S2 (old region-barplot version, not output)
+```{r}
+# superseded by the _map composite below; kept for reference
+# fig.s2 <- (p.h5yr + m + tag | p.prop.sub + m + tag) /
+#           (p.region + m + tag | p.host100.noleg + d_fix + m + tag) +
+#   plot_layout(widths = c(1.2, 1.77)) +
+#   plot_annotation(tag_levels = "A")
+# ggsave(paste0(f.out, "FigS2_summary_fulldates.png"), plot = fig.s2,
+#        width = 15, height = 7, dpi = 300, bg = "white")
+```
+
+## Fig S2 (map): full date range
+```{r}
+# Same layout as Fig 2 (map), full date range panels + all-dates map.
+# panel A: drop the per-bar count labels, as in Fig 2 (map)
+p.h5yr.nolab <- p.h5yr
+p.h5yr.nolab$layers <- Filter(function(l) !inherits(l$geom, "GeomText"), p.h5yr.nolab$layers)
+# and drop the "*" 1996 tick (it collides with the 1995 tick -> reads as "1995*")
+# (shared scale also sets A/B/C to the same limits, as in Fig 2)
+yr.min        <- min(as.numeric(meta.all$collection_year), na.rm = T)
+yr.scale.full <- scale_x_continuous(limits = c(yr.min - 0.5, yr.max + 0.5),
+                                    breaks = seq(1960, 2025, by = 5), expand = c(0, 0))
+p.h5yr.nolab <- p.h5yr.nolab + yr.scale.full
+
+pB.full <- p.dens.sub + yr.scale.full + dens.y +
+  yr.txt + sub.leg + sub.guide + sub.key + leg.bold
+pC.full <- p.dens.clade + yr.scale.full + dens.y +
+  yr.txt + clade.leg.comp + leg.bold
+
+fig.s2.map <- (p.h5yr.nolab + yr.txt + no.x.ttl + m.A + tag.left) +
+              (pB.full + labs(y = "Proportion samples") + no.x.lab + m.stack + tag.left.leg) +
+              (pC.full + labs(y = "Proportion samples") + no.x.lab + m.stack + tag.left.leg) +
+              (wrap_elements(full = p.host100.noleg + d_fix + host.leg + m.host) + tag.corner) +
+              (wrap_elements(full = p.map.full) + m + tag.E) +
+  plot_layout(design = fig.design, widths = c(1.6, 2), heights = c(1, 1.05, 0.45, 1.5)) +
+  plot_annotation(tag_levels = "A")
+ggsave(paste0(f.out, "FigS2_summary_fulldates_map.png"), plot = fig.s2.map,
+       width = 14, height = 8.1, dpi = 300, bg = "white")
+```
+
+# Host taxonomy summary
+How many unique common hosts are in the dataset, how many resolve to a complete species
+via the 06_host multi-taxa taxonomic lookup, and how many unique species result.
+```{r host-taxa-summary}
+# unique common-name hosts in the cleaned dataset (host = corrected common name)
+common.hosts <- sort(unique(meta.all$host[!is.na(meta.all$host)]))
+cat("Unique common hosts in dataset:", length(common.hosts), "\n")
+
+# taxonomic lookup from 06_host multi-taxa (common -> class/order/family/genus/species/eco_group)
+host.taxa <- read.csv("../06_host/2026-01-27_out/complete_host_taxa_with_ecogroup_fixed.csv")
+host.taxa <- host.taxa %>% distinct(common, .keep_all = TRUE)
+
+host.match <- data.frame(common = common.hosts) %>%
+  left_join(host.taxa[, c("common", "species")], by = "common") %>%
+  mutate(has_species = !is.na(species) & species != "")
+
+# backfill: hosts renamed by latin_common_fix.txt (e.g. Great knot) may not be keyed by their
+# common name in the taxonomy lookup, but the Latin name we replaced IS the species binomial.
+# For any such host still missing a species, fill it from that Latin name, using the canonical
+# capitalized form from the lookup's species column where available. (latin.common is built in
+# the host-fix chunk above.)
+need <- !host.match$has_species & host.match$common %in% latin.common$common
+if (any(need)) {
+  lat   <- latin.common$latin[match(host.match$common[need], latin.common$common)]
+  canon <- host.taxa$species[match(tolower(lat), tolower(host.taxa$species))]
+  host.match$species[need]     <- ifelse(is.na(canon), lat, canon)
+  host.match$has_species[need] <- TRUE
+  cat("Species backfilled from Latin fix:", sum(need), "\n")
+}
+
+n.complete <- sum(host.match$has_species)
+cat("Common hosts with a complete species:", n.complete, "of", length(common.hosts),
+    sprintf("(%.1f%%)", 100 * n.complete / length(common.hosts)), "\n")
+cat("Common hosts missing a species:      ", length(common.hosts) - n.complete, "\n")
+cat("Unique species:", n_distinct(host.match$species[host.match$has_species]), "\n")
+
+# common hosts that did not resolve to a species (for inspection / lookup gaps)
+missing.hosts <- host.match$common[!host.match$has_species]
+cat("\n--- Common hosts missing a species ---\n")
+print(missing.hosts)
+
+write.csv(host.match, paste0(f.out, "host_common_to_species.csv"), row.names = FALSE)
+# readable plain-text version: one "common -> species" per line
+writeLines(paste(host.match$common, host.match$species, sep = " -> "),
+           paste0(f.out, "host_common_to_species.txt"))
+
+# sorted list of the unique species present in the dataset (after the Latin->common host fix)
+unique.species <- sort(unique(host.match$species[host.match$has_species]))
+write.csv(data.frame(species = unique.species),
+          paste0(f.out, "unique_species.csv"), row.names = FALSE)
+# also a single comma-separated line, e.g. for pasting into text
+cat(paste(unique.species, collapse = ", "), file = paste0(f.out, "unique_species.txt"))
+
+# unique host common names (after the Latin->common fix), as CSV (one per row) and a single
+# comma-separated text line
+write.csv(data.frame(common = common.hosts),
+          paste0(f.out, "unique_host_common.csv"), row.names = FALSE)
+cat(paste(common.hosts, collapse = ", "), file = paste0(f.out, "unique_host_common.txt"))
+
+# unique species paired with the common name(s) they represent. csv: two columns
+# (species, common); txt: a single line "common (Genus species), ...". common names are
+# joined with "; " in the rare case a species still maps to more than one.
+species.common <- host.match %>%
+  filter(has_species) %>%
+  group_by(species) %>%
+  summarise(common = paste(sort(unique(common)), collapse = "; "), .groups = "drop") %>%
+  arrange(common)
+write.csv(species.common, paste0(f.out, "unique_species_common.csv"), row.names = FALSE)
+cat(paste0(species.common$common, " (", species.common$species, ")", collapse = ", "),
+    file = paste0(f.out, "unique_species_common.txt"))
+# RTF version: same list but the binomial is italicised ({\i ...}). RTF is plain text that
+# Word / Pages / TextEdit open as formatted text (no extra R package needed).
+sc.rtf <- paste0(species.common$common, " ({\\i ", species.common$species, "})", collapse = ", ")
+writeLines(paste0("{\\rtf1\\ansi\\deff0 ", sc.rtf, "}"),
+           paste0(f.out, "unique_species_common.rtf"))
+
+# all common hosts paired with a taxon label: the Genus species where available, otherwise the
+# lowest available rank (genus > family > order > class) from the 06_host taxonomy. Uses the
+# backfilled species from host.match and falls through the higher ranks for the rest, so every
+# host resolves to a label. csv: common, taxon, taxon_rank; txt: "common (taxon), ...".
+host.taxon <- host.match %>%
+  select(common, species) %>%
+  left_join(host.taxa[, c("common", "genus", "family", "order", "class")], by = "common") %>%
+  mutate(across(c(species, genus, family, order, class), ~ ifelse(.x == "", NA, .x)),
+         taxon      = coalesce(species, genus, family, order, class),
+         taxon_rank = case_when(!is.na(species) ~ "species", !is.na(genus) ~ "genus",
+                                !is.na(family) ~ "family", !is.na(order) ~ "order",
+                                !is.na(class) ~ "class", TRUE ~ NA_character_)) %>%
+  select(common, taxon, taxon_rank) %>%
+  arrange(common)
+write.csv(host.taxon, paste0(f.out, "unique_host_common_taxon.csv"), row.names = FALSE)
+cat(paste0(host.taxon$common, " (", host.taxon$taxon, ")", collapse = ", "),
+    file = paste0(f.out, "unique_host_common_taxon.txt"))
+# RTF version: italicise the taxon only when it is a genus or species (family/order/class stay
+# roman, per nomenclature convention).
+ital      <- host.taxon$taxon_rank %in% c("species", "genus")
+taxon.rtf <- ifelse(ital, paste0("{\\i ", host.taxon$taxon, "}"), host.taxon$taxon)
+ht.rtf    <- paste0(host.taxon$common, " (", taxon.rtf, ")", collapse = ", ")
+writeLines(paste0("{\\rtf1\\ansi\\deff0 ", ht.rtf, "}"),
+           paste0(f.out, "unique_host_common_taxon.rtf"))
+```
+
+## Host taxonomy summary: H5 clade 2.3.4.4b only
+Same counts as above, restricted to samples whose filled-in H5 clade (`clade_fill`, from
+`sample_filledin_N-type_HA-clade.csv`) is 2.3.4.4b. Reuses `host.match` from the chunk above
+(so the Latin-name backfill carries over). Run the host-taxa-summary chunk first.
+
+NOTE (2026-09-28): four "host" entries are not animal hosts and should be dropped from the
+reported unique-host counts: "Environment", "Cattle milk product", "Pet food", "Raw pet food".
+None of them resolve to a species, so species counts are unaffected. Broad names (e.g. "Duck",
+"Gull", "Seal") stay in the unique-host counts but not the species counts. Not yet applied in
+code (counts printed by these chunks still include the four). Counts after the drop, from
+2026-09-28_out/host_common_to_species*.csv:
+
+* Entire dataset: 537 unique hosts (541 - 4), 442 unique species, 95 hosts without a species
+* Clade 2.3.4.4b: 464 unique hosts (468 - 4), 384 unique species, 80 hosts without a species
+```{r host-taxa-summary-2344b}
+meta.b <- meta.all %>% filter(clade_fill == "2.3.4.4b")
+cat("2.3.4.4b samples:", n_distinct(meta.b$sample), "\n")
+
+common.hosts.b <- sort(unique(meta.b$host[!is.na(meta.b$host)]))
+host.match.b   <- host.match %>% filter(common %in% common.hosts.b)
+
+n.complete.b <- sum(host.match.b$has_species)
+cat("2.3.4.4b unique common hosts:", length(common.hosts.b), "\n")
+cat("2.3.4.4b common hosts with a complete species:", n.complete.b, "of", length(common.hosts.b),
+    sprintf("(%.1f%%)", 100 * n.complete.b / length(common.hosts.b)), "\n")
+cat("2.3.4.4b unique species:", n_distinct(host.match.b$species[host.match.b$has_species]), "\n")
+
+write.csv(host.match.b, paste0(f.out, "host_common_to_species_2.3.4.4b.csv"), row.names = FALSE)
+```
+
+# DONE
+* Inputs switched to 08_all-together (nuc_seq, phylo_trees, annot)
+* Host duck->mallard fix applied via sample_taxa_lookup_all join
+* Country renaming South Georgia bug fixed
+* Segment name extracted from filename (not index position)
+* Subtype/clade fill-in applied from annot/sample_filledin_N-type_HA-clade.csv
+* IQTREE trees used instead of FastTree
+* v4: filled-in H5 clade plot set (prop / N / smoothed density; full range + 1996) and subtype density
