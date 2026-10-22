@@ -1,0 +1,99 @@
+---
+title: "duck_not_mallard"
+author: "Angela"
+date: "2026-06-18"
+output: html_document
+---
+
+## objectives
+* fix the issue identified in annotate_host without re-running that script
+* issue is that samples that had common as duck were re-categorized as mallard and should not have been: meta.h24$common[which(meta.h24$common=="Duck")]<-"Mallard"
+* read in the output lookup table and find instances where common host was originally duck and then changed to mallard. Impacted the common and potentially species and genus (unknown if just "duck")
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+hosttaxa<-read.csv("2026-01-27_out/complete_host_taxa_with_ecogroup.csv")
+colnames(hosttaxa)
+
+hosttaxa[which(hosttaxa$common%in%c("Mallard","Duck")),c("common","host.old","genus","species")]
+
+# host.old has the original hosts we want to use. keep if distinct species
+
+#correctly assumed mallards:
+# Indian runner duck Anas platyrhynchos domesticus
+# Peking duck Anas platyrhynchos domestica
+
+#but these are distinct:
+# host.old%in%c(Chilean Teal, Yellow-billed Teal, Speckled Teal)
+# Genus species: Anas flavirostris
+# common<-host.old
+
+# if host.old=="Steamer duck"
+# genus=="Tachyeres", species==NA, common=host.old
+
+# if host.old=="spot-billed duck"
+# Genus species: Anas poecilorhyncha;common=host.old
+
+# whistling ducks
+# Family Anatidae,  genus=Dendrocygna;common=host.old
+# also separate (sub)family, Dendrocygnidae, but ignore
+
+#If host.old=Duck
+#common=host.old; species=NA, genus=NA
+```
+
+## export an updated df with correct common and species 
+### (aka not all ducks should have been mallards)
+```{r}
+hosttaxa_fixed <- hosttaxa %>%
+  mutate(
+    common = case_when(host.old %in% c("Chilean teal", "Duck",
+                                       "Spot-billed duck", "Steamer duck",
+                                       "Whistling duck") ~ host.old,
+      TRUE ~ common),
+    genus = case_when(
+      host.old == "Duck"          ~ NA_character_,
+      host.old == "Steamer duck"  ~ "Tachyeres",
+      host.old == "Whistling duck"~ "Dendrocygna",
+      TRUE ~ genus),
+    species = case_when(
+      host.old == "Chilean teal"   ~ "Anas flavirostris",
+      host.old == "Spot-billed duck" ~ "Anas poecilorhyncha",
+      host.old %in% c("Duck", "Steamer duck", "Whistling duck") ~ NA_character_,
+      TRUE ~ species
+    )
+  )
+
+# verify fixes
+hosttaxa_fixed[hosttaxa_fixed$host.old %in% c("Chilean teal","Duck","Spot-billed duck","Steamer duck","Whistling duck"),
+               c("common","host.old","genus","species")]
+
+#write to the same folder as input (even though not 01-27)
+write.csv(hosttaxa_fixed, "2026-01-27_out/complete_host_taxa_with_ecogroup_fixed.csv", row.names = FALSE)
+```
+
+## summary changed hosts
+```{r}
+# summary table: before vs after for changed rows
+changed_hosts <- c("Chilean teal","Duck","Spot-billed duck","Steamer duck","Whistling duck")
+
+before <- hosttaxa[hosttaxa$host.old %in% changed_hosts, c("host.old","common","genus","species")] %>%
+  rename(common_before=common, genus_before=genus, species_before=species)
+
+after <- hosttaxa_fixed[hosttaxa_fixed$host.old %in% changed_hosts, c("host.old","common","genus","species")] %>%
+  rename(common_after=common, genus_after=genus, species_after=species)
+
+both<-left_join(before, after, by="host.old") %>%
+  select(host.old, common_before, common_after, genus_before, genus_after, species_before, species_after)
+write.csv(both,"2026-01-27_out/both_temp.csv")
+```
+
+```{r}
+#next script read csv out as input for into multi-taxa
+#next script read this into treemap_* (overall; 2.3.4.4b since 2021 Malcolm)
+```
+
+

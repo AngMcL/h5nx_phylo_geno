@@ -1,0 +1,1169 @@
+---
+title: "Fully annotate host"
+output: html_document
+date: "2025-09-11"
+---
+
+# Objectives
+* make a dataframe of final host species names (common)
+* v2 change: use the v1 table as a start
+* complete a lookup of all common names to latin: Genus species 
+* fill in the Class, Order, and Family of all taxa
+* Make a nice visual of how these all overlap using treemap or similar
+
+# setup
+## libs
+```{r , message=F}
+library(gtools)
+library(tidyverse)
+library(taxize)
+library(treemap)
+library(RColorBrewer)
+```
+
+## ins and outs
+```{r}
+## in
+# meta.in<-"../04_clean-align/2026-01-12_clean_aligns_wg_out/cleaned_meta/merged_cleaned_meta_HA.csv"
+meta.in<-"../../phylo/01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/trim_nodup_nuc_HA_rooted_resid.csv"
+
+#lookups
+lookup.latin.in<-"../../../h5nx_genomic_ml/data/06_host/2025-09-18_out/complete_host_taxa.csv" #this is the lookup from v1 (good start)
+lookup.latin.v2.in<-"../01a_ncbi/clean_ncbi/lookups/species_common_latin.csv"
+lookup.latin.v22.in<-"../01b_gisaid/clean_gisaid/lookups/latin-common.csv"
+#combine all these to have a complete set of lookups from common to latin taxa
+
+# figures out
+today<-Sys.Date()
+f.out<-paste0(today, "_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+#columns to fill in
+#could also add eco_group here
+taxa<-c("species","genus","family","order","class")
+```
+
+## plotting themes
+```{r}
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"),
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8))
+plot.theme.date<-plot.theme+
+  theme(axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+```
+
+# Read and clean data
+## read in latest clean data with host names 
+```{r}
+#only need meta from one segment
+meta<-read.csv(meta.in)
+meta$host.old<-meta$host #save original for easy lookup later
+
+#Take only the host common name
+meta.h<-meta %>% select(host, host_latin, host.old)
+colnames(meta.h)<-c("common","latin.old", "host.old")
+```
+
+# Common to latin
+```{r}
+## Read in the previous table with all species common/latin from meta_clean
+commonlat<-read.csv(lookup.latin.in)
+commonlat<-commonlat %>% select(-X)
+
+#read in the other two lookup tables (only common host to latin)
+commonlatv2<-read.csv(lookup.latin.v2.in)
+commonlatv22<-read.csv(lookup.latin.v22.in)
+commonlatv2<-commonlatv2 %>% select(-X)
+commonlatv22<-commonlatv22 %>% select(-X)
+cv2<-commonlatv2 %>% filter(!common %in% commonlat$common)
+cv22<-commonlatv22 %>% filter(!common %in% commonlat$common) 
+
+#bind the two (ncbi and gisaid hosts in v2 not v1) together
+# cv222<-bind_rows(cv2, cv22) %>% distinct(common, commonold, .keep_all = T)
+cv222<-bind_rows(cv2, cv22) %>% distinct(common, .keep_all = T)
+
+# head(cv222)
+colnames(cv222) #    common              latin
+```
+
+## Add v2 (common and latin species) to the v1 (full taxa labels) lookup 
+```{r}
+# any(cv222$common %in% commonlat$common)
+#note cv222 latin is a mix of latin Genus species, Genus, order, ... so keep separate until interrogated
+
+#both have colname common, so those should be complete for v2 data
+colnames(commonlat)
+commonlat.more<-commonlat %>% bind_rows (cv222)
+
+#go through each row, if class is NA, then use taxize to fill in based on latin if available, else common.
+
+## add new columns to meta.h for Genus_species 
+# (see if it's in common lat, otherwise look it up on taxize)
+# colnames(commonlat)[which(colnames(commonlat)=="species")]<-"latin.new"
+# commonlat$latin.new<-commonlat$species #duplicate for clarity
+
+#how matched?
+length(which(commonlat.more$common %in% meta.h$common)) #554
+length(which(commonlat.more$commonold[which(!commonlat.more$common %in% meta.h$common)] %in% meta.h$common)) #11 of those where common not matching, 11 common olds match. close to 580..
+length(which(commonlat.more$commonold %in% meta.h$common)) #552
+nrow(commonlat.more) #580
+length(which(meta.h$common %in% commonlat.more$common)) #473
+length(which(meta.h$common[which(!meta.h$common %in% commonlat.more$common)] %in% commonlat.more$commonold)) #81 extra 
+nrow(meta.h) #632
+# meta.h$common [which(!meta.h$common %in% commonlat.more$common |
+                       # meta.h$common %in% commonlat.more$commonold)] #473
+#so I guess this is because the new v2 lookup is only for species that were originally (or also) in the metadata host column, not common (which were kept as is)
+#so we also need to add
+length(which(meta.h$latin.old %in% commonlat.more$species)) #245
+length(which(meta.h$latin.old %in% commonlat.more$latin)) #0
+```
+
+# join lookups to meta, then fill in blanks
+```{r}
+#1. Join common-latin-lookup to meta by common
+meta.h2<-meta.h %>% 
+  left_join (commonlat.more, by="common") 
+
+#2. If is.na, look at the old latin (in the metadata, not always to be trusted but sometimes)
+#where species is complete, the lookup is there.
+meta.nona<-which(!is.na(meta.h2$species))
+length(meta.nona) #471
+#where species not complete, look at the latin.old (in meta.h2)
+meta.na<-which(is.na(meta.h2$species))
+length(meta.na) #242
+#duplicate this column because we are going to contaminate it with not just speceis, but other latin names
+meta.h2$latin.new<-meta.h2$species
+these<-c()
+for(i in 1:length(meta.na)){
+  old.latin<-meta.h2$latin.old[meta.na[i]]
+  #is there anything here? if yes, take.
+  if(!is.na(old.latin) & old.latin!=""){
+    #also check that the old latin is not generic placeholder
+    if(str_detect(tolower(old.latin), "ave$|aves$|avian|mammal|other|bird|feline|canine|rodent|bird|duck|ferret|insect|gull|mink|eagle|goose|common|swan|lynx|sandpiper|pheasant|pintail|ibis")){next}
+    #should rewrite to lookup common hosts generally
+    meta.h2$latin.new[meta.na[i]]<-old.latin 
+    these<-c(these,i)
+  }
+}
+meta.h2$latin.new[meta.na[these]] # looks good.
+
+#latin.new is a mix of Genus species, and broader taxa (2-3 words, assume Genus species (subspecies) (unless spp., then Genus))
+meta.h2$genus_species<-NA
+#for rows where latin.new split on " "  is >1, assign genus species
+for (i in 1:nrow(meta.h2)){
+  #look to see if it's Genus species 
+  hh<-str_split(meta.h2$latin.new[i],pattern = " ") %>% unlist
+  
+  #If it contains "sp." or "sp$" then remove that from hh. Only genus
+  sp<-which(hh %in%c("sp.","sp$"))
+  if(length(sp)>0){hh<-hh[-sp]}
+  if(length(hh)>=2){meta.h2$genus_species[i]<-meta.h2$latin.new[i]}
+  #If length is one... assume it is Genus until proven otherwise
+  if(length(hh)==1){meta.h2$genus[i]<-meta.h2$latin.new[i]}
+}
+meta.h2.back<-meta.h2
+```
+
+## Fill in the classifications
+```{r}
+## Some issues /manual fixes
+meta.h2$latin.new<-str_replace_all(meta.h2$latin.new, 
+                                   c("Cignus olor"="Cygnus olor",
+                                     "Falsco rusticolus"="Falco rusticolus"))
+
+meta.h2$common<-str_replace_all(meta.h2$common, c("Gulls$"="Gull",
+                                                  "Domestic cat"="Cat",
+                                                  "Turkeys"="Turkey",
+                                                  "Cignus olor"="Cygnus olor",
+                                                  # "Steamer duck"="Duck",
+                                                  "Chicken chicken"="Chicken",
+                                                  "Grower"="Chicken",
+                                                  "Rooster"="Chicken",
+                                                  "Tibetan black bear"="Asian black bear",
+                                                  "Mule duck"="Muscovy duck",
+                                                  "Savannah cat" = "Leptailurus serval",
+                                                  "Knot wader"="Calidris tenuirostris"))
+
+# only fill in where there is no data already
+
+#NA in class means the lookup is complete:
+# meta.h2[which(is.na(meta.h2$species) & (!is.na(meta.h2$class))),c(taxa,"common")] %>% head(n=10)
+meta.h2.nc.lat<-meta.h2 %>% 
+  filter(is.na(class)) %>% 
+  filter(!is.na(latin.new)) #use latin where available.
+
+meta.h2.nc.com<-meta.h2 %>% 
+  filter(is.na(class)) %>% 
+  filter(is.na(latin.new)) #else use common
+
+#set up API and key
+taxize::use_entrez()
+#setup api key with NCBI/ORCID
+#usethis::edit_r_environ()
+#ENTREZ_KEY='youractualkeynotthisstring'
+taxize_options(ncbi_sleep = 0.5)
+# try<-classification(meta.h2$common[1:10], db = 'ncbi', batch_size=5)
+# taxa.index<-match(taxa, try[[1]]$rank)
+# try[[1]]$name[taxa.index]
+#keep log of choices for reproducibility
+#only run this where taxa are incomplete
+
+classes.lat<-classification(meta.h2.nc.lat$latin.new, db = 'ncbi', batch_size=5)
+classes.com<-classification(meta.h2.nc.com$common, db = 'ncbi', batch_size=5)
+
+#for elements of output list
+for (i in 1:length(classes.lat)){
+  #check if any data was pulled
+  if(any(!is.na(classes.lat[[i]])==TRUE)){
+    taxa.index<-match(taxa, classes.lat[[i]]$rank)
+    #pull desired taxa if there is info
+    meta.h2[which(meta.h2$latin.new==names(classes.lat)[i]), 
+       match(taxa,colnames(meta.h2))] <- classes.lat[[i]]$name[taxa.index]  
+  }
+}
+#then common
+for (i in 1:length(classes.com)){
+  #check if any data was pulled
+  if(any(!is.na(classes.com[[i]])==TRUE)){
+    taxa.index<-match(taxa, classes.com[[i]]$rank)
+    #pull desired taxa if there is info
+    meta.h2[which(meta.h2$common==names(classes.com)[i]), 
+       match(taxa,colnames(meta.h2))] <- classes.com[[i]]$name[taxa.index]  
+  }
+}
+```
+
+## Where common didn't work for taxize, use other columns
+```{r}
+#Envir in its own class and don't give orde/fam/gen/spec
+meta.h2$class[which(meta.h2$common=="Environment")]<-"Environment"
+meta.h2$class[which(meta.h2$common%in%c("Pet food","Milk","Cattle milk product","Raw food","Raw pet food"))]<-"Food products"
+
+not.called<-which(is.na(meta.h2$class))
+length(not.called) #56
+# meta.h2$common[not.called]
+
+#for those not called, look in genus_species, then in latin.old
+for (i in 1:length(not.called)){
+  #is there a genus_species?
+  if(!is.na(meta.h2$genus_species[not.called[i]])){
+    #Use this as species/latin.new
+    meta.h2$latin.new[not.called[i]]<-meta.h2$genus_species[not.called[i]]
+  }
+  #is there a latin (v2 lookup)?
+  if(is.na(meta.h2$genus_species[not.called[i]]) &
+     !is.na(meta.h2$latin[not.called[i]])){
+    #Use this as species/latin.new
+    meta.h2$latin.new[not.called[i]]<-meta.h2$latin[not.called[i]]
+  }
+  
+  if(!is.na(meta.h2$latin.old[not.called[i]]) & #otherwise latin.old?
+     is.na(meta.h2$genus_species[not.called[i]])){
+    #Use this as species/latin.new
+    meta.h2$latin.new[not.called[i]]<-meta.h2$latin.old[not.called[i]]
+ }
+  #And call remaining taxa
+  tax<-classification(meta.h2$latin.new[not.called[i]], db="ncbi")
+  
+  #fill in colz:
+  if(any(!is.na(tax[[1]])==TRUE)){
+    taxa.index<-match(taxa, tax[[1]]$rank)
+    meta.h2[not.called[i], match(taxa,colnames(meta.h2))] <- tax[[1]]$name[taxa.index]
+    next
+    }
+} #end latin.new loop
+
+# all(meta$host.old %in% meta.h2$host.old)
+```
+
+## remaining incomplete
+```{r}
+#which NA for class (highest level)
+noclass2<-which(is.na(meta.h2$class)) #Nothing called if this is empty
+length(noclass2) #33
+```
+
+## wiki search species and manual changes - can skip with shortcut
+```{r}
+#Instead use taxize wiki search
+# meta.h2$wiki<-NA
+# i=1
+# for (i in 1:length(noclass2)) {
+#   comm<-meta.h2$common[noclass2[i]]
+#   w<-get_wiki(comm) #WIKI
+#   #If nothing, try removing prefix
+#   if(is.na(w[1])){
+#     comm<-str_replace_all(comm, "American |Eurasion |European |Australian |Common | white-morph| blue-morph","") %>% trimws
+#     w<-get_wiki(comm)
+#     #if still NA, remove generic term
+#     if(is.na(w[1])){
+#       comm<-str_replace_all(comm, "goose|duck|gull","") %>% trimws()
+#       if(is.na(w[1])){next} #if still na, then byee.
+#     }
+#   }
+#   w[1]<-str_replace_all(w[1], "_", " ")
+#   if(length(w[1])>0){
+#     #add to wiki
+#     meta.h2$wiki[noclass2[i]]<-w[1]
+#   } 
+# }
+# ## THis is tricky because there are multiple hits for these, and have to decide on the fly which row to keep...see .txt file for manual changes after also
+#  # meta.h2$wiki[noclass2]
+# 
+# # These are garbage
+# meta.h2$wiki<- str_replace_all(meta.h2$wiki, "Catalog\\:Taxon Authorities\\/B|List of virus species|Abelson murine leukemia virus|Abraham Sztejnberg|Aaron Matthew Bauer|Austin Hobart Clark|Arnold S. Menke", "NA")
+# 
+# #CHECK
+# out<-meta.h2[noclass2, c("common","wiki")]
+# write.csv(out, paste0(f.out, "out.csv"))
+```
+
+## Read in the curated wiki lookups
+```{r}
+#REad back in cleaned version
+check<-read.csv(paste0("2026-01-27_out/out_mod.csv"))
+check<-check[,2:3]
+colnames(check)<-c("common","wiki")
+#check match
+length(which(check$common %in% meta.h2$common))
+#join
+if(any(colnames(meta.h2)=="wiki")){meta.h2<-meta.h2 %>% select(-wiki)}
+meta.h22<-left_join(meta.h2, check, 
+                    by="common") #note that only noclass2 will have a join
+
+#For noclass2 run taxize again using wiki
+for (i in 1:length(noclass2)){
+    #See if can be called
+    tax<-classification(meta.h22$wiki[noclass2[i]], db="ncbi")
+    #fill in remainder:
+    if(any(!is.na(tax[[1]])==TRUE)){
+      taxa.index<-match(taxa, tax[[1]]$rank)
+      meta.h22[noclass2[i], match(taxa,colnames(meta.h22))] <- tax[[1]]$name[taxa.index]
+      }
+}
+
+#okeee who's left?
+noclass3<-which(is.na(meta.h22$class)) #Nothing called if this is empty
+length(noclass3) #0!!!
+
+#check
+all(meta$host.old %in% meta.h22$host.old)
+```
+
+## Fix wrong class
+```{r}
+## Some wrong class
+wrong.c<-which (!meta.h22$class %in% c("Aves","Mammalia","Environment","Food products","Insecta")) #one instance of insect
+table(meta.h22$class[wrong.c])
+# meta.h22[wrong.c,]
+length(wrong.c) #77
+
+#use hiding latin names in species
+meta.h22$latin.new[wrong.c[which(is.na(meta.h22$latin.new[wrong.c]))]]<-meta.h22$species[wrong.c[which(is.na(meta.h22$latin.new[wrong.c]))]]
+
+#Use it as the search term for another taxize search
+for (i in 1:length(wrong.c)){
+    #See if can be called
+    tax<-classification(meta.h22$latin.new[wrong.c[i]], db="ncbi")
+    #fill in remainder:
+    if(any(!is.na(tax[[1]])==TRUE)){
+      taxa.index<-match(taxa, tax[[1]]$rank)
+      meta.h22[wrong.c[i], match(taxa,colnames(meta.h22))] <- 
+        tax[[1]]$name[taxa.index]
+      }
+}
+
+table(meta.h22$class[wrong.c])
+```
+
+## misspecified taxa
+```{r}
+## Wrong order
+ord.no<-str_which(meta.h22$order, " ")
+#these are mixed up the same way
+o<-meta.h22$species[ord.no]
+f<-meta.h22$genus[ord.no]
+g<-meta.h22$family[ord.no]
+s<-meta.h22$order[ord.no]
+meta.h22$species[ord.no]<-s
+meta.h22$genus[ord.no]<-g
+meta.h22$family[ord.no]<-f
+meta.h22$order[ord.no]<-o
+
+#wrong families
+fam.no<-str_which(meta.h22$family, " ")
+g<-meta.h22$species[fam.no] #wrong in a different but similar way
+o<-meta.h22$genus[fam.no]
+s<-meta.h22$family[fam.no]
+f<-meta.h22$order[fam.no]
+meta.h22$species[fam.no]<-s
+meta.h22$genus[fam.no]<-g
+meta.h22$family[fam.no]<-f
+meta.h22$order[fam.no]<-o
+
+#Wrong genus
+gen.no<-str_which(meta.h22$genus, " ")
+f<-meta.h22$species[gen.no]
+s<-meta.h22$genus[gen.no]
+o<-meta.h22$family[gen.no]
+g<-meta.h22$order[gen.no]
+meta.h22$species[gen.no]<-s
+meta.h22$genus[gen.no]<-g
+meta.h22$family[gen.no]<-f
+meta.h22$order[gen.no]<-o
+
+#only one word
+spec.no<-str_which(meta.h22$species, "sp.$|spp.$|spp$|sp$")
+spec.no2<-str_which(meta.h22$species," ",negate = T)
+spec.noo<-c(spec.no,spec.no2)
+
+#deal with unique instances
+vals<-c("Anas platyrhynchos", "Anas", "Anatidae", "Anseriformes", "Aves")
+ix<-which(meta.h22$latin.new == "Anas platyrhynchos")
+if(length(ix)>0){meta.h22[ix,taxa]<-matrix(vals, 
+                             nrow=length(ix), ncol=length(vals), byrow=T) }
+spec.noo<-spec.noo[meta.h22$latin.new[spec.noo] != "Anas platyrhynchos"]
+
+#repeat
+vals<-c("Gallus gallus","Gallus","Phasianidae","Galliformes","Aves")
+ix<-which(meta.h22$common== "Chicken")
+if(length(ix)>0){meta.h22[ix,taxa]<-matrix(vals, 
+                             nrow=length(ix), ncol=length(vals), byrow=T) }
+spec.noo<-spec.noo[meta.h22$common[spec.noo] != "Chicken"]
+
+#repeat for this lil guy
+vals<-c("Tyto alba","Tyto","Tytonidae","Strigiformes","Aves")
+ix<-which(meta.h22$latin.new== "Tyto alba")
+if(length(ix)>0){meta.h22[ix,taxa]<-matrix(vals, 
+                             nrow=length(ix), ncol=length(vals), byrow=T) }
+spec.noo<-spec.noo[meta.h22$latin.new[spec.noo] != "Tyto alba"]
+
+vals<-c("Aythya nyroca", "Aythya", "Anatidae","	Anseriformes","Aves")
+ix<-which(meta.h22$latin.new== "Aythya nyroca")
+if(length(ix)>0){meta.h22[ix,taxa]<-matrix(vals, 
+                             nrow=length(ix), ncol=length(vals), byrow=T) }
+spec.noo<-spec.noo[meta.h22$latin.new[spec.noo] != "Aythya nyroca"]
+spec.noo
+
+s<-g<-f<-o<-"NA" 
+#not as similar
+for(i in 1:length(spec.noo)){
+  these<-meta.h22[spec.noo[i],]
+  f<-str_subset(these, "ae$") %>% unlist() %>% as.character() %>% first
+  o<-str_subset(these, "mes$") %>% unlist() %>% as.character()%>% first
+  s<-str_subset(these, "sp| ") %>% unlist() %>% as.character() %>% first
+  g<-s %>% str_replace_all(" sp\\.","")
+  if(length(s)>1){meta.h22$species[spec.noo[i]]<-s}
+  if(length(g)>1){meta.h22$genus[spec.noo[i]]<-g}
+  meta.h22$family[spec.noo[i]]<-f
+  meta.h22$order[spec.noo[i]]<-o
+  s<-g<-f<-o<-"NA"
+}
+```
+
+## additional issues
+```{r}
+meta.h22$order<-str_replace_all(meta.h22$order, c("\\\tAnseriformes"="Anseriformes"))
+fam.not.ord<-str_which(meta.h22$order, "ae")
+o<-meta.h22$genus[fam.not.ord]
+f<-meta.h22$order[fam.not.ord]
+meta.h22$order[fam.not.ord]<-o
+meta.h22$family[fam.not.ord]<-f
+meta.h22$genus[fam.not.ord]<-NA
+
+# meta.h22$family %>% table #looks good
+# meta.h22$genus %>% table
+meta.h22[which(meta.h22$genus=="Charadriiformes" &
+                 meta.h22$common=="Shorebird"),c("genus","family")]<-NA
+meta.h22[which(meta.h22$genus=="Anatidae" ),c("genus","species")]<-NA
+meta.h22[which(meta.h22$genus=="Accipitridae"),c("genus","species")]<-NA
+
+#SPECIES
+# meta.h22$species %>% table
+meta.h22[which(meta.h22$species=="Anser sp."),taxa]<-meta.h22[which(meta.h22$commonold=="Goose"),taxa]
+
+#issues:
+meta.h22[which(meta.h22$species=="White-faced whistling-duck"),c("species","genus")]<-c("Dendrocygna viduata","Dendrocygna")
+
+meta.h22[which(meta.h22$species=="Numididae sp."),c("species","genus")]<-NA
+table(meta.h22$species)
+str_which(meta.h22$species, " ", negate = T)#all have a space
+str_which(meta.h22$species, "sp\\.")
+
+#CHECK
+all(meta$host.old %in% meta.h22$host.old)
+```
+
+## reorder lookup table
+```{r}
+#sorted alphabetically by class order family genus species host.old
+meta.h24<-meta.h22[order(meta.h22$class, meta.h22$order, meta.h22$family, meta.h22$genus, meta.h22$species, meta.h22$host.old),] %>%
+  select(class, order, family, genus, species, common, host.old, wiki)
+
+nrow(meta.h24)==nrow(meta.h22)
+length(unique(meta.h24$host.old)) #632
+length(unique(meta.h24$common)) #622
+length(unique(meta.h24$species)) #440
+```
+
+## NA orders 
+```{r}
+noord<-which(is.na(meta.h24$order))
+length(noord) #25
+# meta.h24[noord,]
+
+for (i in 1:length(noord)){
+  comm<-meta.h24$common[noord[i]]
+  if(is.na(comm)){next}
+  if(comm%in%c("Unknown bird","Environment","Seabird","Waterbird","Shorebird","Wild bird")){next}
+  if(comm=="African barn owl"){ #not its own species
+    meta.h24[noord[i],c("order","family","genus","species","common")]<-
+      c("Strigiformes","Tytonidae","Tyto","Tyto alba","Western barn owl")  }
+  if(comm%in% c("Sebastopol goose","American buff goose","Emden goose","Embden goose","African goose","Pomeranian goose")){
+    meta.h24[noord[i],c("common")]<-"Domestic goose"
+    me<-which(meta.h24$species=="Anser anser")
+    meta.h24[noord[i],c("order","family","genus","species")]<-meta.h24[me[1],c("order","family","genus","species")]  }
+  if(comm%in%c("Black-throated crane")){
+    meta.h24[noord[i],c("order","family","genus","species","common")]<-
+    c("Gruiformes","Gruidae","Grus","Grus nigricollis","Black-necked crane")}
+  if(comm%in%c("Scoter")){
+    meta.h24[noord[i],c("order","family","genus")]<-
+    c("Anseriformes","Anatidae","Melanitta")}
+  if(comm%in%c("Crested auklet")){
+    meta.h24[noord[i],c("order","family","genus","species")]<-
+    c("Charadriiformes","Alcidae","Aethia","Aethia cristatella")}
+    if(comm%in%c("Chinese ringneck pheasant")){
+    meta.h24[noord[i],c("order","family","genus","species","common")]<-
+      c("Galliformes","Phasianidae","Phasianus", "Phasianus colchicus","Common pheasant")}
+    if(comm%in%c("Catalina macaw")){
+    meta.h24[noord[i],c("order","family","genus","species","common")]<-
+      c("Psittaciformes","Psittacidae","Ara", "Ara macao","Scarlet macaw")}
+    if(comm%in%c("Ring-tailed hawk")){
+      meta.h24[noord[i],c("order","family","genus","species")]<- c("	Accipitriformes","Accipitridae","Circus","Circus hudsonius")}
+    if(comm%in%c("American goshawk")){
+      meta.h24[noord[i],c("order","family","genus","species")]<-
+        c("Accipitriformes","Accipitridae","Astur","Astur atricapillus")}
+    if(comm%in%c("Blue fox")){
+      meta.h24[noord[i],c("order","family","genus","species","common")]<-
+        c("Carnivora","Canidae","Vulpes","Vulpes lagopus","Arctic fox")}
+     if(comm%in%c("Eurasian buzzard")){
+       meta.h24[noord[i],c("order","family","genus","species")]<-
+        c("Accipitriformes","Accipitridae","Buteo","Buteo buteo")}
+    if(comm%in%c("White mink")){
+    meta.h24[noord[i],c("order","family","genus","species","common")]<-
+      c("Carnivora","Mustelidae","Mustela","Mustela erminea","Ermine")}
+  if(comm%in%c("Sapphire mink")){
+    meta.h24[noord[i],c("order","family","genus","species","common")]<-
+      c("Carnivora","Mustelidae","Mustela","Mustela erminea","Ermine")}
+  if(comm%in%c("Loon")){
+    meta.h24[noord[i],c("order","family","genus")]<- c("Gaviiformes","Gaviidae","Gavia")}
+  if(comm%in%c("Pigeon guillemot")){
+    meta.h24[noord[i],c("order","family","genus","species")]<-
+      c("Charadriiformes","Alcidae","Cepphus","Cepphus columba")}
+  if(comm%in%c("Great skua")){
+    meta.h24[noord[i],c("order","family","genus","species")]<-
+      c("Charadriiformes","Stercorariidae","Stercorarius","Stercorarius parasiticus")}
+} 
+```
+
+## incomplete family
+```{r}
+nofam<-which(is.na(meta.h24$family))
+length(nofam) #11
+# meta.h24[nofam,]
+
+for (i in 1:length(nofam)){
+  comm<-meta.h24$common[nofam[i]]
+  if(comm%in% c("Unknown bird","Environment","Seabird","Waterbird","Shorebird","Raptor")){next}
+    if(comm=="Quail"){ #use superfamily
+    meta.h24$family[nofam[i]]<-"Phasianoidea"}
+    if(comm=="Pinniped"){#use Parvorder
+    meta.h24$family[nofam[i]]<-"Pinnipedia"}
+} #end nofam loop
+
+# meta.h24[nofam,]
+```
+
+## GENUS
+```{r}
+# meta.h24[which(meta.h24$common=="Pheasant" & meta.h24$order=="Anseriformes"),c("order","family")]<-c("Galliformes","Phasianidae")
+
+nogen<-which(is.na(meta.h24$genus))
+length(nogen) #67
+
+genus_lut<-tibble::tribble(
+  ~common,            ~genus,
+  "Eagle",            "Aquila",
+  "Sea eagle",        "Haliaeetus",
+  "Hawaiian goose",   "Branta",
+  "Nene",             "Branta",
+  "Duck",             "Anas",
+  "Goose",            "Anser",
+  "Grey goose",       "Anser",
+  "Pomeranian goose", "Anser",
+  "Swan",             "Cygnus",
+  "Eider",            "Somateria",
+  "Gull",             "Larus",
+  "Swiftlet",         "Aerodramus/Collocalia",
+  "Stone curlew",     "Burhinus",
+  "Lapwing",          "Vanellus",
+  "Oystercatcher",    "Haematopus",
+  "Kittiwake",        "Rissa",
+  "Stork",            "Ciconia",
+  "Turtle dove",      "Streptopelia",
+  "Guinea",           "Numida",
+  "Peacock",          "Pavo",
+  "Cranes",           "Grus",
+  "Coot",             "Fulica",
+  "Moorhen",          "Gallinula",
+  "Reed warbler",     "Acrocephalus",
+  "Munia",            "Lonchura",
+  "Shrike",           "Lanius",
+  "Herons",           "Ardea/Egretta",
+  "Ibis",             "Threskiornis",
+  "Spoonbill",        "Platalea",
+  "Grebe",            "Podiceps",
+  "Fulmar",           "Fulmarus",
+  "Shearwater",       "Ardenna/Puffinus",
+  "Rhea",             "Rhea",
+  "Frigatebird",      "Fregata",
+  "Gannet",           "Morus/Sula",
+  "Arctic skua",      "Stercorarius",
+  "Blowfly",          "Calliphora/Lucilia",
+  "Dolphin",          "Tursiops/Delphinus",
+  "Porpoise",         "Phocoena",
+  "Lynx",             "Lynx",
+  "Polecat",          "Mustela",
+  "Otter",            "Lutra/Lontra/Enhydra",
+  "Badger",           "Meles",
+  "Sea lion",         "Zalophus/Eumetopias/Otaria",
+  "Seal",             "Phoca/Pusa/Halichoerus",
+  "Bear",             "Ursus",
+  "Pika",             "Ochotona",
+  "Macaque",          "Macaca",
+  "Pigeon",           "Columba" )
+
+meta.h24[nogen, ]<-meta.h24[nogen, ] %>%
+  mutate(common_clean = str_squish(common),
+         genus = coalesce(genus,
+                          genus_lut$genus[match(common_clean, genus_lut$common)])) %>%
+  select(-common_clean)
+
+nogen<-which(is.na(meta.h24$genus))
+length(nogen) #18
+
+#couple tings
+meta.h24$species[meta.h24$common=="Ferret"]<-"Mustela furo"
+meta.h24$species[meta.h24$common=="Cattle"]<-"Bos taurus"
+meta.h24[which(meta.h24$genus=="Phalacrocoracidae"),c("genus","species")]<-NA
+
+#not butterflies
+meta.h24 <- meta.h24 %>%
+  mutate(class  = ifelse(str_detect(tolower(common), "peacock") & class == "Insecta", "Aves", class),
+    order  = ifelse(str_detect(tolower(common), "peacock") & class == "Aves", "Galliformes", order),
+    family = ifelse(str_detect(tolower(common), "peacock") & class == "Aves", "Phasianidae", family),
+    genus  = ifelse(str_detect(tolower(common), "peacock") & class == "Aves", "Pavo", genus),
+    species = ifelse(genus == "Pavo", "Pavo cristatus", species)
+)
+meta.h24[str_which(meta.h24$common, "peacock"),taxa]
+```
+
+## a few more misplaced genus/family labels
+```{r}
+meta.h24 <- meta.h24 %>%
+  mutate(common2 = str_squish(common), host_old2 = str_squish(host.old),
+    # Black-necked grebe: trust common name, overwrite taxonomy
+    class  = ifelse(common2 == "Black-necked grebe", "Aves", class),
+    order  = ifelse(common2 == "Black-necked grebe", "Podicipediformes", order),
+    family = ifelse(common2 == "Black-necked grebe", "Podicipedidae", family),
+    genus  = ifelse(common2 == "Black-necked grebe", "Podiceps", genus),
+    species= ifelse(common2 == "Black-necked grebe", "Podiceps nigricollis", species),
+
+    # Curlew: genus should be Numenius when common says Curlew
+    genus  = ifelse(common2 == "Curlew", "Numenius", genus),
+
+    # Tern row where genus was accidentally set to family name
+    genus  = ifelse(common2 == "Tern" & genus == "Laridae", NA_character_, genus),
+
+    # Dove/Pigeon rows where genus was accidentally set to family name
+    genus  = ifelse(common2 %in% c("Dove","Pigeon") & genus == "Columbidae", NA_character_, genus),
+
+    #  Finch row where genus was accidentally set to "Passerine"
+    genus  = ifelse(common2 == "Finch" & genus == "Passerine", NA_character_, genus),
+
+    # Quail row where family/genus placeholders were used
+    family = ifelse(common2 == "Quail" & family == "Phasianoidea", "Phasianidae", family),
+    genus  = ifelse(common2 == "Quail" & genus %in% c("Galliformes","Phasianoidea"), NA_character_, genus)
+  ) %>%
+  select(-common2, -host_old2)
+
+# AND unnecc leading " "
+meta.h24 <- meta.h24 %>%
+  mutate(across(c(class, order, family, genus, species, common, host.old, eco_group), ~ stringr::str_squish(.x)))
+
+#some non-genus genuses
+meta.h24 <- meta.h24 %>%
+  mutate(genus = ifelse(genus %in% c("Canidae","Corvidae","Icteridae","Passeridae","Pycnonotidae","Turdidae",
+                            "Mephitidae","Psittacidae","Pelecanidae","Strigidae","Pinnipedia"),
+                   NA_character_, genus)
+  )
+
+# Multi-genus strings (with “/”) used as genus (take first)
+meta.h24 <- meta.h24 %>%
+  mutate(genus = ifelse(stringr::str_detect(genus, "/"),
+                        stringr::str_extract(genus, "^[^/]+"),
+                        genus))
+#One “genus present but family missing”
+meta.h24 <- meta.h24 %>%
+  mutate(family = ifelse(common == "Blowfly" & is.na(family), "Calliphoridae", family))
+```
+
+## multiple common names for one species, keep/use most frequent in the data
+```{r}
+meta.h24.c<-meta.h24 %>%
+  filter(!is.na(species)) %>%
+  group_by(species,common) %>%
+  summarize(tot.spec=n())
+multi<-meta.h24.c$species[which(meta.h24.c$tot.spec>1)]
+
+for(i in 1:length(multi)){
+  spec<-multi[i]
+  t<-meta.h24$host.old [which(meta.h24$species==spec)] %>% unique #one unique each
+  #how many in full meta? get name of most common
+  most<-names(table(meta$host.old[meta$host.old %in% t]) %>% sort(decreasing = T))[1]
+  #replace all of the instances of common with (most) common
+  meta.h24$common [meta.h24$species==spec]<-most
+}
+
+#look at common hosts within species
+meta.h24.c2<-meta.h24 %>% 
+  filter(!is.na(species)) %>%
+  dplyr::group_by(species,common) %>%
+  summarize(tot.spec.com=n()) 
+multi<-meta.h24.c2$species[which(meta.h24.c2$tot.spec.com>1)]
+#LOOOK
+meta.h24[which(meta.h24$species %in% multi), c("common","species","host.old")]
+
+#sometimes we need the more specific species...
+meta.h24$common[which(meta.h24$species=="Gyps fulvus")]<-"Eurasian griffon vulture"
+meta.h24$common[which(meta.h24$species=="Anas platyrhynchos")]<-"Mallard" #duck too generic, even though this captures wild and domestic
+
+### Fixed this mistake.... Not all Ducks are mallards duhhh
+# meta.h24$common[which(meta.h24$common=="Duck")]<-"Mallard"
+
+#if duck, can only assign to family and order level
+meta.h24$family[which(meta.h24$common=="Duck")]<-"Anatidae"
+meta.h24$order[which(meta.h24$common=="Duck")]<-"Anseriformes"
+
+meta.h24$species[which(meta.h24$common=="Mallard")]<-"Anas platyrhynchos" 
+meta.h24$genus[which(meta.h24$common=="Mallard")]<-"Anas" 
+meta.h24$common[which(meta.h24$species=="Anser caerulescens")]<-"Snow goose" #not lesser
+meta.h24$common[which(meta.h24$species=="Uria aalge")]<-"Common murre" #better than guillemot
+meta.h24$common[which(meta.h24$species=="Pavo cristatus")]<-"Indian peafowl"
+meta.h24$common[which(meta.h24$species=="Podiceps cristatus")]<-"Great crested grebe" #again, took grebe.
+meta.h24$common[which(meta.h24$species=="Phoenicopterus roseus")]<-"Greater flamingo"
+meta.h24$common[which(meta.h24$species=="Turdus merula")]<-"Common blackbird"
+meta.h24$common[which(meta.h24$species=="Gallus gallus")]<-"Chicken"
+meta.h24$common[which(meta.h24$species=="Hirundo rustica")]<-"Barn swallow"
+meta.h24$common[which(meta.h24$species=="Tyto alba")]<-"Western barn owl"
+meta.h24$common[which(meta.h24$species=="Delphinus delphis")]<-"Common dolphin"
+#deal with this:
+meta.h24$host.old[which(meta.h24$host.old=="Cormorant" & meta.h24$common=="Great cormorant")]<-"Great cormorant"
+
+## order again and make distinct
+meta.h24<-meta.h24[order(meta.h24$class, meta.h24$order, meta.h24$family, meta.h24$genus, meta.h24$species,meta.h24$host.old),] %>%
+  select(class, order, family, genus, species, common, host.old)  %>% 
+  distinct(class, order, family, genus, species, common, host.old, .keep_all = T)
+#should be T
+length(unique(meta.h24$host.old))==nrow(meta.h24)
+meta.h24[which(duplicated(meta.h24$host.old)),]
+```
+
+# Add ecological groupings
+```{r}
+meta.h24 <- meta.h24 %>%
+  mutate(
+    class2  = str_squish(class),
+    order2  = str_squish(order),
+    family2 = str_squish(family),
+    common2 = str_squish(common),
+    eco_group = case_when(
+      # Non-host / non-organism bins
+      class2 == "Environment" ~ "environment",
+      # Food/products: dairy is special (per your request)
+      class2 == "Food products" & str_detect(str_to_lower(common2), "milk") ~ "dairy",
+      class2 == "Food products" ~ "food_product",
+      # Invertebrates
+      class2 == "Insecta" ~ "invertebrate",
+      # Mammals
+      # Dairy mammals (cattle/goat) -> dairy
+      class2 == "Mammalia" & family2 == "Bovidae" & genus %in% c("Bos", "Capra") ~ "dairy",
+      # Marine mammals
+      class2 == "Mammalia" & family2 %in% c("Delphinidae", "Phocoenidae", "Otariidae", "Phocidae") ~ "marine_mammal",
+      class2 == "Mammalia" & order2 == "Pinnipedia" ~ "marine_mammal",
+      class2 == "Mammalia" & common2 %in% c("Sea otter", "Marine otter") ~ "marine_mammal",
+      # Companion animals
+      class2 == "Mammalia" & common2 %in% c("Dog", "Cat") ~ "companion_animal",
+      # Swine
+      class2 == "Mammalia" & family2 == "Suidae" ~ "swine",
+      # Everything else mammal
+      class2 == "Mammalia" ~ "terrestrial_mammal",
+
+      # Birds (Aves)
+      # Raptors
+      class2 == "Aves" & order2 %in% c("Accipitriformes", "Falconiformes", "Strigiformes") ~ "raptor",
+      class2 == "Aves" & common2 == "Raptor" ~ "raptor",
+      # Waterfowl
+      class2 == "Aves" & order2 == "Anseriformes" ~ "waterfowl",
+      class2 == "Aves" & common2 %in% c("Waterfowl", "Waterbird") ~ "waterfowl",
+      # Shorebirds (subset of Charadriiformes)
+      class2 == "Aves" & order2 == "Charadriiformes" &
+        (family2 %in% c("Scolopacidae", "Charadriidae", "Recurvirostridae", "Burhinidae", "Jacanidae") |
+           common2 %in% c("Shorebird", "Sandpiper")) ~ "shorebird",
+      # Seabirds
+      class2 == "Aves" & (
+        order2 %in% c("Procellariiformes", "Suliformes", "Sphenisciformes", "Gaviiformes") |
+          family2 %in% c("Alcidae", "Laridae", "Stercorariidae", "Phalacrocoracidae", "Sulidae", "Fregatidae") |
+          common2 %in% c("Seabird", "Skua", "Arctic skua")
+      ) ~ "seabird",
+      # Waders (herons/ibis/storks/flamingo etc.)
+      class2 == "Aves" & (
+        order2 %in% c("Pelecaniformes", "Ciconiiformes", "Phoenicopteriformes") |
+          family2 %in% c("Ardeidae", "Threskiornithidae", "Ciconiidae", "Phoenicopteridae")
+      ) ~ "wader",
+      # Poultry/gamebirds
+      class2 == "Aves" & order2 == "Galliformes" ~ "poultry",
+      # Passerines
+      class2 == "Aves" & order2 == "Passeriformes" ~ "passerine",
+      # Generic birds
+      class2 == "Aves" & common2 == "Unknown bird" ~ "bird_unspecified",
+      class2 == "Aves" ~ "land_bird",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(-class2, -order2, -family2, -common2)
+
+table(meta.h24$eco_group, useNA = "ifany")
+meta.h24 %>% filter(is.na(eco_group)) %>% count(class, order, family, common, sort = TRUE)
+
+# FINAL LOOKUP including the new eco_groups and with fixed mallard/duck issue (20260618)
+write.csv(meta.h24, paste0(f.out, "complete_host_taxa_with_ecogroup.csv"), row.names=FALSE)
+```
+
+Host species were classified using both taxonomic and ecological criteria to capture complementary dimensions of influenza A virus (IAV) host structure. Taxonomic labels (class, order, family, genus, species) reflect phylogenetic relationships, whereas ecological host groups were defined to represent shared exposure pathways, habitat use, movement ecology, and contact networks that shape opportunities for viral transmission. Ecological grouping is widely used in IAV research because viral maintenance and spread are structured by functional host guilds such as waterfowl, shorebirds, seabirds, terrestrial birds, and mammals rather than by taxonomy alone, with wild aquatic birds recognized as the primary natural reservoir of IAV and distinct ecological host groups exhibiting characteristic subtype distributions and evolutionary dynamics (https://doi.org/10.1128/MMBR.00097-07
+; https://doi.org/10.1126/science.1253820
+; https://doi.org/10.1016/j.tim.2014.01.004
+). Ecological differentiation among bird and mammal groups has been shown to influence viral diffusion, reassortment, and spillover risk across host communities and environments (https://doi.org/10.1038/nrmicro.2017.118
+; https://doi.org/10.1098/rstb.2011.0193
+). At the same time, ecological similarity does not imply biological equivalence: host susceptibility and transmission potential are also shaped by receptor distribution, immune responses, and tissue tropism, including variation in α2,3- and α2,6-linked sialic acid receptors across taxa and tissues, and the presence of mixed receptor profiles in some species such as poultry and swine (https://doi.org/10.1038/nrmicro1716
+; https://doi.org/10.1128/JVI.73.4.3095-3102.1999
+; https://doi.org/10.1099/vir.0.2009/006577-0
+). Accordingly, ecological host groups were treated as an orthogonal layer of information to taxonomy, representing transmission ecology rather than molecular host compatibility. In addition to broad categories such as waterfowl, seabirds, shorebirds, raptors, passerines, terrestrial mammals, and marine mammals, we defined a distinct group for lactating domestic mammals (e.g., cattle, goats) and associated milk-derived products, reflecting shared husbandry practices and exposure pathways at the wildlife–livestock–environment interface, which have been implicated in recent cross-species transmission events (https://doi.org/10.1126/science.adk3076
+). This combined taxonomic–ecological framework was used to standardize host metadata and to enable analyses that integrate phylogenetic relationships with ecological drivers of IAV transmission and evolution.
+
+
+# Summary plots and tables of unique levels
+```{r}
+#how many and what are the unique level
+ggplot(meta.h24)+
+  geom_bar(aes(x=class))+
+  plot.theme+
+  labs(y="N common")
+
+ggsave(paste0(f.out, "N_classes_common.tiff"), width=3, height=3)
+
+#same, color by order
+ggplot(meta.h24)+
+  geom_bar(aes(x=class, fill=order))+
+  plot.theme+
+  labs(y="N common")+
+  scale_fill_viridis_d(option="F")
+
+ggsave(paste0(f.out, "N_classes_order_common.tiff"), width=8, height=6)
+
+#facet'
+meta.h24 %>%
+  filter(class %in% c("Aves","Mammalia")) %>%
+  ggplot()+
+    geom_bar(aes(x=order, fill=family))+
+    plot.theme.date+
+    labs(y="N common")+
+    scale_fill_viridis_d(option="F")+
+  facet_wrap(~class,nrow=2, scales="free")+
+  guides(fill=guide_legend(ncol=4, title="Family",
+    override.aes = list(size = 0.5)))+
+  labs(x="Order")
+
+ggsave(paste0(f.out, "N_order_byfam_facetclass_common.tiff"), width=10, height=6.5)
+
+## BY GENUS
+#facet'
+meta.h24 %>%
+  filter(class %in% c("Aves","Mammalia")) %>%
+  ggplot()+
+    geom_bar(aes(x=order, fill=genus))+
+    plot.theme.date+
+    labs(y="N common")+
+    scale_fill_viridis_d(option="F")+
+    facet_wrap(~class,nrow=2, scales="free")+
+    guides(fill=guide_legend(ncol=5, title="Genus",
+      override.aes = list(size = 0.05)))+
+    labs(x="Order",y=NULL)+
+    theme(legend.text=element_text(size=5), legend.key.size = unit(4,"mm"))
+ggsave(paste0(f.out, "N_order_byGenus_facetclass_common.tiff"), width=10, height=9)
+```
+
+## join taxa on to the meta to look at frequency trends
+```{r}
+#check matches
+length(which(meta$host.old %in% meta.h24$host.old ))==nrow(meta)
+
+#join meta to the host annotated meta by host / commonold
+meta2<-left_join(meta,meta.h24, by="host.old")
+length(which(is.na(meta2$class)))==0
+
+# Write a small set of these columns for easy lookup by sample
+meta2.sub<-meta2 %>% select(sample, class, order, family, genus, species, common, host.old, eco_group)
+# write.csv(meta2.sub, paste0(f.out, "meta_sample_taxa.csv"))
+```
+
+## repeat the taxa frequency plots using meta
+```{r}
+#how many and what are the unique level
+ggplot(meta2)+
+  geom_bar(aes(x=class))+
+  plot.theme+
+  labs(y="N common")
+ggsave(paste0(f.out, "n_samp_classes_common.tiff"), width=3, height=3)
+
+#same, color by order
+ggplot(meta2)+
+  geom_bar(aes(x=class, fill=order))+
+  plot.theme+
+  labs(y="N common")+
+  scale_fill_viridis_d(option="F")
+ggsave(paste0(f.out, "n_samp_classes_order_common.tiff"), width=8, height=6)
+
+#facet'
+meta2 %>%
+  filter(class %in% c("Aves","Mammalia")) %>%
+  ggplot()+
+    geom_bar(aes(x=order, fill=family))+
+    plot.theme.date+
+    labs(y="N common")+
+    scale_fill_viridis_d(option="F")+
+  facet_wrap(~class,nrow=2, scales="free")+
+  guides(fill=guide_legend(ncol=4, title="Family",
+    override.aes = list(size = 0.5)))+
+  labs(x="Order")
+ggsave(paste0(f.out, "n_samp_order_byfam_facetclass_common.tiff"), width=10, height=6.5)
+
+## BY GENUS
+#facet'
+meta2 %>%
+  filter(class %in% c("Aves","Mammalia")) %>%
+  ggplot()+
+    geom_bar(aes(x=order, fill=genus))+
+    plot.theme.date+
+    labs(y="N common")+
+    scale_fill_viridis_d(option="F")+
+    facet_wrap(~class,nrow=2, scales="free")+
+    guides(fill=guide_legend(ncol=5, title="Genus",
+      override.aes = list(size = 0.05)))+
+    labs(x="Order",y=NULL)+
+    theme(legend.text=element_text(size=5), legend.key.size = unit(4,"mm"))
+ggsave(paste0(f.out, "n_samp_order_byGenus_facetclass_common.tiff"), width=10, height=9)
+
+#BY eco_group
+meta2 %>%
+  # filter(class %in% c("Aves","Mammalia")) %>%
+  ggplot()+
+    geom_bar(aes(x=common, fill=common))+
+    plot.theme.date+
+    # labs(y="N common")+
+    scale_fill_viridis_d(option="F")+
+    facet_wrap(~eco_group,nrow=2, scales="free")+
+    # guides(fill=guide_legend(ncol=5, title="host.old",
+    #   override.aes = list(size = 0.05)))+
+    labs(x=NULL,y=NULL)+
+    theme(legend.text=element_text(size=5), 
+          legend.key.size = unit(4,"mm"),
+          legend.position = "none")
+ggsave(paste0(f.out, "n_samp_order_byHost.old_facet-ecogroup_common.tiff"), width=18, height=10)
+
+# filter if the sum for that eco_group is less than 1% of the data
+eco.count<-meta2 %>% group_by(eco_group) %>% count()
+eco.main<-eco.count$eco_group[which(eco.count$n > (nrow(meta2)/100))]
+
+
+meta2 %>%
+  filter(eco_group %in% eco.main) %>%
+  ggplot()+
+    geom_bar(aes(x=common, fill=common))+
+    plot.theme.date+
+    # labs(y="N common")+
+    scale_fill_viridis_d(option="F")+
+    facet_wrap(~eco_group,nrow=2, scales="free")+
+    # guides(fill=guide_legend(ncol=5, title="host.old",
+    #   override.aes = list(size = 0.05)))+
+    labs(x=NULL,y=NULL)+
+    theme(legend.text=element_text(size=5), 
+          legend.key.size = unit(4,"mm"),
+          legend.position = "none")
+ggsave(paste0(f.out, "n_samp_order_byHost.old_facet-Mainecogroup_common.tiff"), width=18, height=10)
+```
+
+# Treemaps plots
+## Prep data
+```{r}
+# meta2.s<-meta2 %>% 
+#   filter(!is.na(species))
+meta2.s<-meta2 #keep species this time
+meta2.s2<- meta2.s %>% 
+  group_by(class,order, family, genus, species, common) %>% 
+  summarize(.groups="rowwise",tot=n())
+
+#Orders
+# meta2.s2
+cc<-meta2.s2 %>% group_by(order) %>% summarize(n=sum(tot))
+cc<-cc[order(cc$n,decreasing = T),]
+ord.order<-cc$order
+meta2.s2$order<-factor(meta2.s2$order,levels=ord.order)
+```
+
+## Treemaps mammals
+```{r}
+#mammals:
+meta2.s2 %>% filter(class=="Mammalia")%>%
+  treemap(index=c("order","family"),
+          vSize="tot",
+          title = "Class: Mammalia",
+          vColor = "order",
+          type = "categorical",
+          palette = brewer.pal(n = length(unique(meta2.s2$order[meta2.s2$class=="Mammalia"])),                                name = "Dark2"),
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255)
+
+#mammals:order and species
+meta2.s2 %>% filter(class=="Mammalia")%>%
+  treemap(index=c("order","species"),
+          vSize="tot",
+          title = "Class: Mammalia",
+          vColor = "order",
+          type = "categorical",
+          palette = brewer.pal(n = length(unique(meta2.s2$order[meta2.s2$class=="Mammalia"])),
+                               name = "Dark2"),
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255)
+
+#mammals:order and common
+meta2.s2 %>% filter(class=="Mammalia")%>%
+  treemap(index=c("order","common"),
+          vSize="tot",
+          title = "Class: Mammalia",
+          vColor = "order",
+          type = "categorical",
+          palette = brewer.pal(n = length(unique(meta2.s2$order[meta2.s2$class=="Mammalia"])),
+                               name = "Dark2"),
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255)
+
+#colors for families:
+#mammals:family and common
+meta2.s2 %>% filter(class=="Mammalia")%>%
+  treemap(index=c("family","common"),
+          vSize="tot",
+          title = "Class: Mammalia",
+          vColor = "family",
+          type = "categorical",
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255,
+          fontsize.legend =8,
+          fontsize.labels = 12)
+```
+## Avian treemaps
+```{r}
+#Orders
+ave.ord.cols<-colorRampPalette(brewer.pal(n = 8, name = "Dark2"))(length(unique(meta2.s2$order[meta2.s2$class=="Aves"]))) 
+#order genus
+meta2.s2 %>% filter(class=="Aves") %>%
+  filter(!is.na(order)) %>%
+  treemap(index=c("order","genus"),
+          vSize="tot",
+          title = "Class: Aves",
+          vColor = "order",
+          type = "categorical",
+          palette = ave.ord.cols,
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255,
+          fontsize.legend = 8,
+          fontsize.labels = 12)
+
+#order family
+meta2.s2 %>% filter(class=="Aves") %>%
+  filter(!is.na(order)) %>%
+  treemap(index=c("order","family"),
+          vSize="tot",
+          title = "Class: Aves",
+          vColor = "order",
+          type = "categorical",
+          palette = ave.ord.cols,
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255,
+          fontsize.legend = 8,
+          fontsize.labels = 12)
+
+#Avians:order and species
+meta2.s2 %>% filter(class=="Aves")%>%
+  filter(!is.na(order)) %>%
+  treemap(index=c("order","species"),
+          vSize="tot",
+          title = "Class: Aves",
+          vColor = "order",
+          type = "categorical",
+          palette = ave.ord.cols,
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255,
+          fontsize.legend = 8,
+          fontsize.labels = 12)
+
+#Avians:order and common
+meta2.s2 %>% filter(class=="Aves")%>%
+  filter(!is.na(order)) %>%
+  treemap(index=c("order","common"),
+          vSize="tot",
+          title = "Class: Aves",
+          vColor = "order",
+          type = "categorical",
+          palette = ave.ord.cols,
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+          bg.labels = 255,
+          fontsize.legend = 8,
+          fontsize.labels = 12)
+
+#colors for families:
+#Avians:family and common
+meta2.s2 %>% filter(class=="Aves")%>%
+  filter(!is.na(family)) %>%
+  treemap(index=c("family","common"),
+          vSize="tot",
+          title = "Class: Aves",
+          vColor = "family",
+          type = "categorical",
+          align.labels=list(c("left", "top"),  c("right", "bottom")),
+          border.col = "white",
+           bg.labels = 255,
+          fontsize.legend = 4,
+          fontsize.labels = 12)
+```
+
