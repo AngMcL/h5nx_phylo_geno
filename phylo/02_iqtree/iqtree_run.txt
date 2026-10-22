@@ -1,0 +1,26 @@
+
+#run1 2026-01-15
+
+#Done
+iqtree2 -s trim_nodup_nuc_NS_rooted_rem.fasta -te trim_nodup_nuc_NS_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+iqtree2 -s trim_nodup_nuc_NA_rooted_rem.fasta -te trim_nodup_nuc_NA_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+
+# Running
+iqtree2 -s trim_nodup_nuc_HA_rooted_rem.fasta -te trim_nodup_nuc_HA_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+
+iqtree2 -s trim_nodup_nuc_NP_rooted_rem.fasta -te trim_nodup_nuc_NP_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+
+iqtree2 -s trim_nodup_nuc_PB2_rooted_rem.fasta -te trim_nodup_nuc_PB2_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+
+iqtree2 -s trim_nodup_nuc_PA_rooted_rem.fasta -te trim_nodup_nuc_PA_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+iqtree2 -s trim_nodup_nuc_PB1_rooted_rem.fasta -te trim_nodup_nuc_PB1_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+iqtree2 -s trim_nodup_nuc_M_rooted_rem.fasta -te trim_nodup_nuc_M_rooted_rem.tre -T AUTO -mem 50G -m GTR+F+R10 --keep-ident
+
+
