@@ -1,0 +1,495 @@
+---
+title: "plot_cdhit_clades"
+output: html_document
+date: "2025-10-10"
+---
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+library(ape)
+library(ggtree)
+library(gtools)
+library(RColorBrewer)
+```
+
+## ins/outs
+```{r}
+#TREES
+tree.fold<-"../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+trees.in<-list.files(tree.fold,pattern = ".tre",full.names = T) %>%
+  mixedsort()
+# tree.fold<-"../../02_iqtree/gtr_f_r10_rooted/"
+# trees.in<-list.files(tree.fold,pattern = ".treefile",full.names = T) %>%
+#   mixedsort()
+l.tr<-length(trees.in)
+
+## Summaries of CDHIT for the perc identity clusters on the trees
+cutoff<-"98"
+
+## nucnames and cluster are in the cd dfs
+cd.fold<-"2026-01-23_g1_eval_out/"
+
+cd.in<-list.files(cd.fold, pattern = "cd-out", full.names = T)
+cd.in <- cd.in [str_which(cd.in, paste0(cutoff,"_g1.csv"))]
+cd.in<-cd.in %>% mixedsort()
+
+# outputs
+today<-Sys.Date()
+f.out.tree<-paste0(today, "_g1_trees_out/")
+if(!dir.exists(f.out.tree)){dir.create(f.out.tree)}
+
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+segments.ms<-mixedsort(segments)
+```
+
+```{r}
+#plotting theme
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"), 
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+```
+
+
+## Read in the iqtrees, meta
+```{r}
+cd<-trees<-replicate(n=l.tr, vector())
+clade.cols<-replicate(vector,n=l.tr)
+
+for (i in 1:l.tr){
+  trees[[i]]<-ape::read.tree(trees.in[i])
+  cd[[i]]<-read.csv(cd.in[i])
+  print(all(trees[[i]]$tip.label %in% cd[[i]]$nucname))
+  
+  #trees with tips colored by clade
+  segment<-cd[[i]]$seg[1]
+  if(is.na(segment)){segment<-"NA_seg"}
+  cd[[i]]<-cd[[i]] %>% select(nucname, cluster, seg)
+
+  NN<-Ntip(trees[[i]])
+
+  #use the same colors in plots below
+  n.clade<-length(table(cd[[i]]$cluster)) #excl NA
+  clade.cols[[i]]<-colorRampPalette(brewer.pal(name="Paired",n=12))(n.clade)
+  names(clade.cols[[i]])<- sample(unique(cd[[i]]$cluster)) #shuffle it for contrast
+  
+  #basic tree
+  # t<-ggtree(trees[[i]])+
+  #   geom_tree()+
+  #   geom_treescale(x=0, y=ceiling(NN*0.95),
+  #                  fontsize=3, linesize=0.5, offset=200)
+  # 
+  # # Add the clades
+  # # all( cd[[i]]$nucname %in% trees[[i]]$tip.label)
+  # t <- t %<+% cd[[i]]
+  # t2 <- t + geom_tippoint(aes(color = cluster),size=0.7,alpha=0.7) +
+  #   # geom_tiplab(aes(color=cluster, label=cluster),size=1.5,offset=0.01)+
+  #     theme(legend.position = "right",
+  #           legend.title=element_text(face="bold")) +
+  #   ggtitle(segment)+
+  #   scale_color_manual(values=clade.cols[[i]], na.value="grey70")+
+  #   guides(color=guide_legend(override.aes = list(size=1)))+
+  #   theme(legend.position = "none")
+  # t2; ggsave(paste0(f.out.tree, segment,"_cdhit",cutoff,"_TipColor.tiff"),
+  #        width=5,height=9,units="in")
+}
+```
+
+## Plot the within clade patristic distances for each segment
+```{r}
+for (i in 1:l.tr){
+  cl<-unique(cd[[i]]$cluster)
+  n.cl<-length(cl)
+  seg<-cd[[i]]$seg[1]
+  cluster.df<-data.frame("rownm"=NA, "name"=NA, "value"=NA, "cluster"=NA)
+  
+  for (j in 1:n.cl){
+    cl.tips<-cd[[i]] %>% filter(cluster == cl[j]) %>% pull(nucname)
+    #within cluster pastristic distances
+    cl.tree<-keep.tip(trees[[i]],tip= cl.tips)
+    if(Ntip(cl.tree)==1){next}
+    w.in<-cophenetic.phylo(x = cl.tree)
+    #remove rendundant above diag and make long
+    w.mat<-as.matrix(w.in)
+    w.mat[lower.tri(w.mat,diag=T)] <- NA
+    # w.mat[1:3,1:3]
+    w.df<-as.data.frame(w.mat)
+    w.df$rownm<-rownames(w.df)
+    l.df<-w.df %>% pivot_longer(col=1:(ncol(w.df)-1))
+    #remove NAs
+    na.rem<-which(is.na(l.df$value))
+    l.df<-l.df[-na.rem, ]
+    #add cluster
+    l.df$cluster<-cl[j]
+    cluster.df<-bind_rows(cluster.df, l.df)
+  }
+    p<-ggplot(cluster.df)+
+      geom_density(aes(x=value, fill=cluster), alpha=0.5, adjust=0.5)+
+      plot.theme+
+      labs(x="Patristic distance within clusters")+
+      ggtitle(seg)+
+      scale_fill_manual(values=clade.cols[[i]])+
+      theme(legend.position = "none")
+    p
+    ggsave(paste0(f.out.tree, seg, "_patdist_withinclades.tiff"),height=5, width =6)
+}
+```
+
+## Compare distrib of within and between cluster pat dists
+```{r}
+suppressPackageStartupMessages({library(ape);library(dplyr);library(ggplot2)})
+
+set.seed(111)
+sample_frac<-0.25              # fraction of all possible comparisons to sample
+max_samples_per_type<-5e6      # hard cap to avoid excessive memory use
+
+choose2<-function(n)n*(n-1)/2  # helper: number of pairwise combinations
+
+# sample within-cluster distances without materializing all pairs
+sample_within_distances<-function(D,cluster_indices,n_draw){
+  sizes<-vapply(cluster_indices,length,integer(1))
+  pair_counts<-choose2(sizes)
+  keep<-which(pair_counts>0)
+  if(length(keep)==0||n_draw<=0)return(numeric(0))
+  pair_counts<-pair_counts[keep]
+  clusters_keep<-cluster_indices[keep]
+  # sample clusters proportional to number of within-cluster pairs
+  pick<-sample.int(length(clusters_keep),size=n_draw,replace=TRUE,prob=pair_counts)
+  out<-numeric(n_draw)
+  for(j in seq_len(n_draw)){
+    idx<-clusters_keep[[pick[j]]]
+    ab<-sample(idx,size=2,replace=FALSE)  # sample two distinct tips
+    out[j]<-D[ab[1],ab[2]]
+  }
+  out
+}
+
+# sample between-cluster distances without building full cross blocks
+sample_between_distances<-function(D,cluster_indices,n_draw){
+  sizes<-vapply(cluster_indices,length,integer(1))
+  k<-length(cluster_indices)
+  if(k<2||n_draw<=0)return(numeric(0))
+  pairs_i<-integer(0);pairs_j<-integer(0);weights<-numeric(0)
+  # enumerate cluster pairs and weight by nk*nl
+  for(a in 1:(k-1)){
+    na<-sizes[a]
+    if(na==0)next
+    for(b in (a+1):k){
+      nb<-sizes[b]
+      if(nb==0)next
+      w<-na*nb
+      if(w>0){
+        pairs_i<-c(pairs_i,a)
+        pairs_j<-c(pairs_j,b)
+        weights<-c(weights,w)
+      }
+    }
+  }
+  if(length(weights)==0)return(numeric(0))
+  # sample cluster-pairs proportional to number of cross pairs
+  pick<-sample.int(length(weights),size=n_draw,replace=TRUE,prob=weights)
+  out<-numeric(n_draw)
+  for(j in seq_len(n_draw)){
+    a<-pairs_i[pick[j]];b<-pairs_j[pick[j]]
+    ia<-sample(cluster_indices[[a]],size=1)
+    ib<-sample(cluster_indices[[b]],size=1)
+    out[j]<-D[ia,ib]
+  }
+  out
+}
+
+for(i in seq_along(trees)){
+  segment<-segments.ms[i]
+  cat("Processing segment:",segment,"\n")
+  
+  # compute full cophenetic matrix (main memory cost)
+  D<-cophenetic.phylo(trees[[i]])
+  
+  # align cluster assignments to tree tip order
+  cluster_df<-cd[[i]]%>%select(nucname,cluster)
+  cluster_vec<-cluster_df$cluster[match(rownames(D),cluster_df$nucname)]
+  if(anyNA(cluster_vec))stop("Missing cluster assignments for segment: ",segment)
+  
+  # split tip indices by cluster
+  cluster_indices<-split(seq_along(cluster_vec),cluster_vec)
+  sizes<-vapply(cluster_indices,length,integer(1))
+  
+  # compute total possible within and between comparisons
+  n_within_pairs<-sum(choose2(sizes))
+  n_total<-sum(sizes)
+  n_between_pairs<-(n_total^2-sum(sizes^2))/2
+  
+  # determine how many distances to sample for plotting
+  n_within_draw<-min(max_samples_per_type,ceiling(sample_frac*n_within_pairs))
+  n_between_draw<-min(max_samples_per_type,ceiling(sample_frac*n_between_pairs))
+  
+  # sample distances directly from D
+  within_vals<-sample_within_distances(D,cluster_indices,n_within_draw)
+  between_vals<-sample_between_distances(D,cluster_indices,n_between_draw)
+  
+  # minimal dataframe for density plotting
+  plot_df<-data.frame(value=c(within_vals,between_vals),type=c(rep("within",length(within_vals)),rep("between",length(between_vals))))
+  
+  p<-ggplot(plot_df)+
+    geom_density(aes(x=value,fill=type),alpha=0.5,adjust=2)+
+    plot.theme+
+    labs(x="Patristic distance within or between clusters")+
+    ggtitle(segment)+
+    scale_fill_manual(values=c("darkred","darkblue"))
+  
+  ggsave(filename=paste0(f.out.tree,segment,"_patdist_withinbetween.tiff"),plot=p,height=5,width=6)
+  
+  # clean up large objects before next segment
+  rm(D,within_vals,between_vals,plot_df,p,cluster_vec,cluster_indices);gc()
+}
+```
+
+## Quantify monophyly to compare this to the GenoFlu and CDHIT clusters (add this and code above for wtihin vs betwen)
+```{r}
+suppressPackageStartupMessages({library(ape);library(dplyr);library(tidyr);library(ggplot2)})
+
+set.seed(111)
+
+segments_positional<-sort(segments)
+
+out_dir<-"cluster_eval"
+if(exists("f.out"))out_dir<-f.out
+if(!dir.exists(out_dir))dir.create(out_dir,recursive=TRUE)
+
+method_id<-"cdhit"
+if(exists("method_name"))method_id<-method_name
+
+# fast precompute for rooted binary trees:
+# - parent of each node
+# - children list per internal node
+# - postorder internal nodes (parent after children)
+# - descendant tip counts per node
+precompute_tree_cache<-function(tree){
+  if(!is.rooted(tree))tree<-root(tree,outgroup=tree$tip.label[1],resolve.root=TRUE)
+  tree<-reorder.phylo(tree,order="postorder")
+  n_tip<-length(tree$tip.label)
+  n_all<-n_tip+tree$Nnode
+  parent<-integer(n_all)
+  parent[tree$edge[,2]]<-tree$edge[,1]
+  children<-split(tree$edge[,2],tree$edge[,1])
+  post_nodes<-tree$edge[,1]
+  post_nodes<-post_nodes[!duplicated(post_nodes)]
+  desc_tip_n<-integer(n_all)
+  desc_tip_n[seq_len(n_tip)]<-1L
+  for(v in post_nodes){
+    ch<-children[[as.character(v)]]
+    if(length(ch)==0)next
+    desc_tip_n[v]<-sum(desc_tip_n[ch])
+  }
+  edge_len<-numeric(n_all)
+  edge_len[tree$edge[,2]]<-tree$edge.length
+  list(tree=tree,n_tip=n_tip,n_all=n_all,parent=parent,children=children,post_nodes=post_nodes,desc_tip_n=desc_tip_n,node_depth=node.depth.edgelength(tree),edge_len=edge_len)
+}
+
+# Fitch parsimony score for a binary tip character (0/1), unordered, returns minimum # changes
+# tree cache must be postorder; children map reused across clusters
+fitch_parsimony_binary_cache<-function(cache,x){
+  n_all<-cache$n_all
+  children<-cache$children
+  post_nodes<-cache$post_nodes
+  n_tip<-cache$n_tip
+  S0<-logical(n_all);S1<-logical(n_all)
+  tip_idx<-seq_len(n_tip)
+  S0[tip_idx]<-x==0
+  S1[tip_idx]<-x==1
+  score<-0L
+  for(v in post_nodes){
+    ch<-children[[as.character(v)]]
+    if(length(ch)==0)next
+    i1<-ch[1];i2<-ch[2]
+    a0<-S0[i1]&&S0[i2];a1<-S1[i1]&&S1[i2]
+    if(a0||a1){
+      S0[v]<-a0;S1[v]<-a1
+    } else {
+      S0[v]<-(S0[i1]||S0[i2]);S1[v]<-(S1[i1]||S1[i2])
+      score<-score+1L
+    }
+  }
+  score
+}
+
+evaluate_segment_clusters_fast<-function(tree,cluster_df,seg_id,method_id,do_fragmentation=FALSE){
+  # tree cache computed once per segment
+  cache<-precompute_tree_cache(tree)
+  tree<-cache$tree
+  n_tip<-cache$n_tip
+  parent<-cache$parent
+  node_depth<-cache$node_depth
+  desc_tip_n<-cache$desc_tip_n
+  edge_len<-cache$edge_len
+
+  # align cluster assignments to tree tip order
+  tip_pos<-match(cluster_df$nucname,tree$tip.label)
+  cluster_df<-cluster_df[!is.na(tip_pos),,drop=FALSE]
+  cluster_df$tip_idx<-match(cluster_df$nucname,tree$tip.label)
+  cluster_vec<-rep(NA_character_,n_tip)
+  cluster_vec[cluster_df$tip_idx]<-as.character(cluster_df$cluster)
+  if(anyNA(cluster_vec)){
+    n_missing<-sum(is.na(cluster_vec))
+    stop("Missing cluster assignments after matching to tree tips for segment=",seg_id,"; missing_tips=",n_missing,"/",n_tip)
+  }
+
+  clusters<-sort(unique(cluster_vec))
+  cluster_indices<-split(seq_len(n_tip),cluster_vec)
+
+  # preallocate per-cluster outputs
+  k<-length(clusters)
+  cl_nodes<-integer(k)
+  cl_sizes<-integer(k)
+  cl_purity<-numeric(k)
+  cl_type<-character(k)
+  cl_frag<-integer(k)
+  cl_mrca_depth<-numeric(k)
+  cl_mrca_desc_n<-integer(k)
+  cl_pd<-numeric(k)
+
+  # Faith's PD: total branch length of the minimal subtree connecting a cluster's
+  # tips to their MRCA. Paths are walked tip->MRCA and each edge counted once via
+  # a per-cluster stamp (avoids double-counting where paths converge).
+  pd_stamp<-integer(cache$n_all)
+
+  for(ci in seq_len(k)){
+    cl<-clusters[ci]
+    tips_idx<-cluster_indices[[cl]]
+    tips_lab<-tree$tip.label[tips_idx]
+    cl_sizes[ci]<-length(tips_idx)
+
+    # MRCA and descendant tip count used for purity; no descendant-tip enumeration
+    if(length(tips_idx)==1){
+      mrca<-tips_idx
+      cl_nodes[ci]<-mrca
+      cl_mrca_depth[ci]<-node_depth[mrca]
+      cl_mrca_desc_n[ci]<-1L
+      cl_purity[ci]<-1
+      cl_type[ci]<-"singleton"
+      cl_frag[ci]<-0L
+      cl_pd[ci]<-0
+      next
+    }
+
+    mrca<-getMRCA(tree,tips_lab)
+    cl_nodes[ci]<-mrca
+    cl_mrca_depth[ci]<-node_depth[mrca]
+    cl_mrca_desc_n[ci]<-desc_tip_n[mrca]
+    cl_purity[ci]<-length(tips_idx)/desc_tip_n[mrca]
+
+    pd<-0
+    for(ti in tips_idx){
+      node<-ti
+      while(node!=mrca&&pd_stamp[node]!=ci){
+        pd_stamp[node]<-ci
+        pd<-pd+edge_len[node]
+        node<-parent[node]
+      }
+    }
+    cl_pd[ci]<-pd
+
+    # fragmentation score computed only if requested
+    frag<-NA_integer_
+    if(isTRUE(do_fragmentation)){
+      x<-rep(0L,n_tip);x[tips_idx]<-1L
+      frag<-fitch_parsimony_binary_cache(cache,x)
+    } else {
+      frag<-NA_integer_
+    }
+    cl_frag[ci]<-ifelse(is.na(frag),NA_integer_,frag)
+
+    # monophyly/paraphyly/polyphyly classification:
+    # monophyletic: purity==1
+    # polyphyletic: fragmentation>=2 (membership arises in multiple disjoint regions)
+    # paraphyletic: otherwise
+    if(cl_purity[ci]==1){
+      cl_type[ci]<-"monophyletic"
+    } else if(!is.na(frag)&&frag>=2){
+      cl_type[ci]<-"polyphyletic"
+    } else {
+      cl_type[ci]<-"paraphyletic"
+    }
+  }
+
+  # nested detection using parent-walk with node->cluster map (avoids cluster x cluster matching)
+  node_to_cluster<-integer(cache$n_all)
+  for(ci in seq_len(k)){
+    n<-cl_nodes[ci]
+    if(node_to_cluster[n]==0L)node_to_cluster[n]<-ci
+  }
+  nested_in<-rep(NA_character_,k)
+  nested_out_n<-integer(k)
+  for(ci in seq_len(k)){
+    cur<-parent[cl_nodes[ci]]
+    while(cur>0&&node_to_cluster[cur]==0L)cur<-parent[cur]
+    if(cur>0&&node_to_cluster[cur]>0L){
+      nested_in[ci]<-clusters[node_to_cluster[cur]]
+      nested_out_n[node_to_cluster[cur]]<-nested_out_n[node_to_cluster[cur]]+1L
+    }
+  }
+
+  cl_tbl<-data.frame(segment=seg_id,method=method_id,cluster=clusters,n_tips=as.integer(cl_sizes),type=cl_type,mrca_node=as.integer(cl_nodes),mrca_depth=as.numeric(cl_mrca_depth),mrca_desc_n=as.integer(cl_mrca_desc_n),purity=as.numeric(cl_purity),fragmentation=as.integer(cl_frag),nested_in=as.character(nested_in),nested_out_n=as.integer(nested_out_n),faith_pd=as.numeric(cl_pd),stringsAsFactors=FALSE)
+
+  seg_tbl<-cl_tbl%>%summarise(segment=seg_id,method=method_id,n_clusters=n(),n_tips_total=sum(n_tips),prop_clusters_monophyletic=mean(type=="monophyletic"),prop_tips_monophyletic=sum(n_tips[type=="monophyletic"])/sum(n_tips),prop_clusters_paraphyletic=mean(type=="paraphyletic"),prop_clusters_polyphyletic=mean(type=="polyphyletic"),mean_purity=mean(purity[n_tips>1],na.rm=TRUE),median_purity=median(purity[n_tips>1],na.rm=TRUE),mean_fragmentation=mean(fragmentation,na.rm=TRUE),median_fragmentation=median(fragmentation,na.rm=TRUE),mean_mrca_depth=mean(mrca_depth[n_tips>1],na.rm=TRUE),median_mrca_depth=median(mrca_depth[n_tips>1],na.rm=TRUE),prop_clusters_nested_in=mean(!is.na(nested_in)),mean_faith_pd=mean(faith_pd[n_tips>1],na.rm=TRUE),median_faith_pd=median(faith_pd[n_tips>1],na.rm=TRUE),mean_faith_pd_per_tip=mean((faith_pd/n_tips)[n_tips>1],na.rm=TRUE),median_faith_pd_per_tip=median((faith_pd/n_tips)[n_tips>1],na.rm=TRUE),.groups="drop")
+
+  list(cluster_table=cl_tbl,segment_table=seg_tbl)
+}
+
+# inputs expected in each clustering-method evaluation script:
+# trees: list of phylo objects across segments in positional alphabetical order
+# tc: list of data.frames across segments in the same order, each containing nucname and cluster
+if(!exists("trees"))stop("Object 'trees' not found")
+if(!exists("cd"))stop("Object 'cd' not found")
+if(length(trees)!=length(segments_positional))stop("Length mismatch: trees=",length(trees),", segments=",length(segments_positional))
+if(length(cd)!=length(segments_positional))stop("Length mismatch: cd=",length(cd),", segments=",length(segments_positional))
+
+# set do_fragmentation=FALSE for a large speedup if fragmentation is not required for a given run
+do_fragmentation<-FALSE
+
+cl_all<-list();seg_all<-list()
+
+for(i in seq_along(segments_positional)){
+  seg<-segments_positional[i]
+  cat("Processing segment:",seg,"\n")
+  res<-evaluate_segment_clusters_fast(trees[[i]],cd[[i]],seg,method_id,do_fragmentation=do_fragmentation)
+  cl_all[[seg]]<-res$cluster_table
+  seg_all[[seg]]<-res$segment_table
+}
+
+cluster_metrics_all<-bind_rows(cl_all)
+segment_metrics_all<-bind_rows(seg_all)
+
+write.csv(cluster_metrics_all,file=paste0(out_dir,"/",method_id,"_cluster-metrics_all-segments.csv"),row.names=FALSE)
+write.csv(segment_metrics_all,file=paste0(out_dir,"/",method_id,"_segment-metrics_all-segments.csv"),row.names=FALSE)
+
+# distributions across all segments for cluster-level metrics
+plot_long_all<-cluster_metrics_all%>%
+  mutate(type=factor(type,levels=c("monophyletic","paraphyletic","polyphyletic","singleton")))%>%
+  select(segment,type,n_tips,purity,fragmentation,mrca_depth)%>%
+  pivot_longer(cols=c(purity,fragmentation,mrca_depth,n_tips),names_to="metric",values_to="value")
+
+p_all<-ggplot(plot_long_all,aes(x=value,y=log(..count..)))+
+  geom_histogram(bins=60)+
+  facet_grid(metric~segment,scales="free")+
+  plot.theme+
+  labs(title=paste0(method_id," all segments: cluster metrics"),x=NULL,y="count")
+ggsave(filename=paste0(out_dir,"/",method_id,"_all-segments_cluster-metrics_hist.tiff"),plot=p_all,height=10,width=12)
+
+# segment-level readouts (one row per segment)
+plot_seg_long<-segment_metrics_all%>%
+  select(segment,prop_clusters_monophyletic,prop_tips_monophyletic,mean_purity,mean_fragmentation,mean_mrca_depth,prop_clusters_nested_in)%>%
+  pivot_longer(cols=-segment,names_to="metric",values_to="value")
+
+p_seg<-ggplot(plot_seg_long,aes(x=segment,y=value))+
+  geom_col()+
+  facet_grid(metric~.,scales="free_y",switch="y")+
+  plot.theme+
+  labs(title=paste0(method_id," all segments: segment summaries"),x=NULL,y=NULL)
+ggsave(filename=paste0(out_dir,"/",method_id,"_all-segments_segment-summaries.tiff"),plot=p_seg,height=12,width=9)
+```
+

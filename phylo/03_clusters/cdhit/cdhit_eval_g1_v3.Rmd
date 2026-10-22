@@ -1,0 +1,302 @@
+---
+title: "cdhit"
+output: html_document
+date: "2025-10-10"
+---
+
+# CDHIT output evaluation
+
+## v3 changes
+* similar to treecluster_eval_v3:
+* n clusters,mean and median size changed to not include singletons
+* make versions of eval plots that do not have legends (composite only has one legend) and additional plot for median
+* move composite plot inside and with seg_leg
+
+## Objectives
+* Read in the clstr txt file to parse the clusters, members, size, percentage sim
+* Compare the different cutoffs and word lengths
+* PLot the clusters from CD-HIT on tips of best tree
+
+```{r}
+library(tidyverse)
+library(NatParksPalettes)
+library(cowplot)
+```
+
+#Ins and Outs
+```{r}
+files.in<-list.files("cdhit_out_g1/",pattern=".fasta.clstr", full.names = T)
+
+f.out<-paste0(Sys.Date(), "_g1_eval_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+#plotting theme
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"), 
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+```
+
+## Loop over all files, plot results, extract a summary table 
+```{r}
+#Empty list to hold the files
+l.f<-length(files.in)
+summ.list<-replicate(n=l.f, vector())
+
+i=1
+for (i in 1:l.f){
+  
+  file.in<-files.in[i]
+  # file.in<-"cdhit_HA_97_w11.fasta.clstr"
+  
+  cd <- read.table(file.in, header = FALSE, sep = "\n")
+  params<-str_extract(file.in, paste0("(?<=", "\\/cdhit_", ").*?(?=", "\\.fasta", ")"))
+  
+  #also what is the segment and percetn identity?
+  seg<-str_split(params,"_") %>% unlist() %>% first()
+  perc<-(str_split(params,"_") %>% unlist())[2]
+  # perc<-str_split(params,"_") %>% unlist() %>% last() #for non G1
+  #Separate out the > cluster rows and ascribe those as cluster column
+  # Construct the regex pattern using positive lookbehind (?<=...) and positive lookahead (?=...)
+  # The (.*?) part captures any characters non-greedily between the patterns
+  cd$nucname <- str_extract(cd$V1, paste0("(?<=", "\\>", ").*?(?=", "\\.\\.\\.", ")"))
+  cd$percent <- str_extract(cd$V1, paste0("(?<=", "\\+\\/", ").*?(?=", "\\%", ")"))
+  cd$length <- str_extract(cd$V1, paste0("(?<=", "\\\t", ").*?(?=", "nt,", ")"))
+  
+  #Find cluster and assign to relevant rows as new column
+  clustrows<-str_which(cd$V1, "Cluster")
+  cd$cluster<-NA
+  for (j in 1:length(clustrows)){
+    max<-(clustrows[j+1]-1) #this will be the last/max row to assign cluster unless...
+    if(j==length(clustrows)){max<-nrow(cd)} #unless it is the last i, then goes to maxrow
+    cd$cluster[clustrows[j]:max]<-str_remove(cd$V1[clustrows[j]], "\\>")
+  }
+  
+  #now remove the cluster rows
+  cd<-cd[-clustrows, ] %>% select (-V1)
+  cd$params<-params #for future ref
+  cd$seg<-seg
+  cd$perc<-perc
+  
+  #make a dpercent#make a df of unique clusters, cluster size
+  cd.cl<-cd %>% group_by(cluster) %>% 
+    summarize(.groups="rowwise",
+              size=n())
+  cd.cl<-cd.cl[order(cd.cl$size, decreasing = T),]
+  clust.ord<-cd.cl$cluster
+  cd.cl$cluster<-factor(cd.cl$cluster, levels=clust.ord)
+  cd.cl$params<-params #for future ref
+  cd.cl$seg<-seg
+  cd.cl$perc<-perc
+  
+  #Summarize entire cdhit run
+  cd.cl.summ<-as.data.frame(t(as.matrix(summary(cd.cl$size))))
+  cd.cl.summ$n.clusters<-nrow(cd.cl)
+  cd.cl.summ$n.singles<-length(which(cd.cl$size ==1))
+  cd.cl.summ$min.no.sing=min(cd.cl$size[which(cd.cl$size!=1)])
+  cd.cl.summ$sd=sd(cd.cl$size)
+  cd.cl.summ$params<-params
+  cd.cl.summ$seg<-seg
+  cd.cl.summ$perc<-perc
+  cd.cl.summ <- cd.cl.summ %>% 
+    mutate( #include no singles metrics
+      ratio.max.min = Max. / min.no.sing,
+      n.clusters.nosing = n.clusters - n.singles,
+      mean.nosing = mean(cd.cl$size[which(cd.cl$size != 1)]),
+      median.nosing = median(cd.cl$size[which(cd.cl$size != 1)]) )
+  summ.list[[i]]<-cd.cl.summ
+  
+  key.features<-paste0("CD-HIT min. % similarity: ",perc,
+                       "\nN clusters: ",cd.cl.summ$n.clusters.nosing[1],
+                       "\nN singles: ",cd.cl.summ$n.singles[1],
+                       "\nMax size: ", cd.cl.summ$Max.[1],
+                       "\nMean size: ", sprintf("%.1f",cd.cl.summ$mean.nosing[1]),
+                       "\nMedian size: ", cd.cl.summ$median.nosing[1])
+  
+  ## plot LOG cluster sizes and annotate run with key features
+  cd.cl %>%
+    filter(size!=1) %>%
+    ggplot()+
+      geom_bar(aes(x=cluster,y=log10(size), fill=cluster),stat="identity")+
+      scale_fill_viridis_d(option="D")+
+      labs(x="Cluster",y="Log10 (cluster size)")+
+      ggtitle(paste0("CD-HIT: ",seg))+
+      annotate(geom="label",x=cd.cl.summ$n.clusters.nosing*0.5, 
+               y=log(cd.cl.summ$Max.), hjust=0, vjust=1, label=key.features)+
+      plot.theme+
+      theme(legend.position = "none", axis.text.x=element_blank())
+  ggsave(paste0(f.out, "logclustsize_",params,".tiff"), height=3, width=5, units="in")
+  
+  #write cd to use for cluster identity
+  write.csv(cd, paste0(f.out, "cd-out_",params,".csv"))
+  
+  #write cd to use for cluster chars
+  write.csv(cd.cl, paste0(f.out, "cd-cl-out_",params,".csv"))
+} #end of loop across all the cluster files (outputs from cdhit for diff params)
+```
+
+## plot summ list by segment 
+```{r}
+# segment colors
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+segment.cols<-natparks.pals(name="Yellowstone", n=length(segments))
+segment.cols<-segment.cols[c(1,5,2,4,6,3,8,7)]
+names(segment.cols)<-segments
+
+## join all the elems into one df
+cd.cl.summ.all<-bind_rows(summ.list)
+cd.cl.summ.all<-cd.cl.summ.all %>% mutate(max.min.ratio = Max. / min.no.sing, remove=F)
+cd.cl.summ.all$seg<-factor(cd.cl.summ.all$seg, levels=segments)
+cd.cl.summ.all$perc<-as.numeric(cd.cl.summ.all$perc) 
+```
+
+# Comparison plots
+```{r}
+#plot by segment: n cluster
+cd.cl.summ.all %>%
+  ggplot(aes(x=perc, y=n.clusters.nosing, group=seg, color=seg)) +
+  geom_point()+
+  # geom_smooth(method = "loess", se = F, linewidth = )+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT min. % similarity", y="N clusters", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, "percentID_vs_Ncluster.nosing.tiff"),height=4,width=4)
+
+#plot by segment: n singles
+cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=n.singles, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="N singletons", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, "percentID_vs_Nsingle.tiff"),height=4,width=4)
+
+#plot by segment: mean size .nosing
+cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=mean.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Mean cluster size", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, "percentID_vs_meansize.nosing.tiff"),height=4,width=4)
+
+#plot by segment: max size
+cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=Max., group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Maximum size", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, "percentID_vs_maxsize.tiff"),height=4,width=4)
+
+#plot by segment: max size
+cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=median.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Median size", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, "percentID_vs_mediansize.nosing.tiff"),height=4,width=4)
+
+#plot by segment: max/min ratio
+cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=max.min.ratio, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Max/min (no singles) size", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, "percentID_vs_maxminratio.tiff"),height=4,width=4)
+```
+
+# Comparison plots
+```{r}
+#plot by segment: n cluster
+p1<-cd.cl.summ.all %>%
+  ggplot(aes(x=perc, y=n.clusters.nosing, group=seg, color=seg)) +
+  geom_point()+
+  # geom_smooth(method = "loess", se = F, linewidth = )+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="N clusters (excl. singletons)", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p1,paste0(f.out, "percentID_vs_Ncluster.nosing_noleg.tiff"),height=3,width=4)
+
+#plot by segment: n singles
+p2<-cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=n.singles, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="N singletons", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p2,paste0(f.out, "percentID_vs_Nsingle_noleg.tiff"),height=3,width=4)
+
+#plot by segment: mean size .nosing
+p3<-cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=mean.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Mean size (excl. singletons)", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p3,paste0(f.out, "percentID_vs_meansize.nosing_noleg.tiff"),height=3,width=4)
+
+#plot by segment: max size
+p4<-cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=Max., group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Maximum size", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p4, paste0(f.out, "percentID_vs_maxsize_noleg.tiff"),height=3,width=4)
+
+#plot by segment: median size
+cd.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=perc, y=median.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="CD-HIT minimum % similarity", y="Median size", color="Segment")+
+  theme(legend.position = "none")
+ggsave(paste0(f.out, "percentID_vs_mediansize.nosing_noleg.tiff"),height=3,width=4)
+
+## LEGEND ONLY
+plot_legend <- get_legend(p4+
+                            theme(legend.position = "top")+
+                            guides(color=guide_legend(nrow=1)))
+
+ggsave(filename = paste0(f.out,"seg_leg.tiff"),
+  plot = ggdraw(plot_legend), 
+  width = 8, 
+  height = 0.25, 
+  units = "in",
+  dpi = 300)
+```
+
+#composite plot 
+```{r}
+row1<-plot_grid(p1, p2, ncol=2,nrow=1, labels=c("A","B"),label_size = 16, align="hv")
+row2<-plot_grid(p3,p4, ncol=2,nrow=1, labels=c("C","D"),label_size = 16, align="hv")
+full_plot<-plot_grid(plot_legend, row1, row2, ncol=1, nrow=3,
+                     rel_heights = c(0.25,3,3), rel_widths = c(1,1,1),
+                     labels=NULL)
+
+ggsave(plot = full_plot,filename = paste0(f.out, "cdhit_composite_size_vs_thresh.tiff"),
+       width=8,height=6.25,bg="white")
+```
+
+# Write data
+```{r}
+#write cd to use for cluster chars
+write.csv(cd.cl.summ.all, paste0(f.out, "cd-cl-summaries-out_",params,".csv"))
+```
+
