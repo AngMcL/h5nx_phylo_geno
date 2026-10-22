@@ -1,0 +1,450 @@
+---
+title: "cowplots"
+author: "It's me! Angela!"
+date: "2026-01-20"
+output: html_document
+---
+
+
+
+## cdhit evaluate thresholds
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-07-01_g1_eval_out"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+# helper: read TIFF/PNG/etc -> ggplot object (optional crop top & bottom)
+img_to_gg<-function(img_path,crop_frac=0){
+  img<-magick::image_read(img_path)
+  info<-magick::image_info(img)
+  w<-info$width[1]
+  h<-info$height[1]
+
+  if(!is.null(crop_frac) && crop_frac>0){
+    crop_px<-round(h*crop_frac)
+    new_h<-h-(2*crop_px)
+    geom<-paste0(w,"x",new_h,"+0+",crop_px)
+    img<-magick::image_crop(img,geom)
+  }
+
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames (in order A-D)
+expected_files<-function(){
+  c("percentID_vs_Ncluster.nosing.tiff",
+    "percentID_vs_Nsingle.tiff",
+    "percentID_vs_maxsize.tiff",
+    "percentID_vs_meansize.nosing.tiff")
+}
+
+# build 2x2 grid + save
+save_grid_2x2<-function(img_dir,out_dir,
+                        width=8,height=8,dpi=300,
+                        out_name="cdhit_eval_composite.png"){
+
+  wanted<-expected_files()
+  paths<-path(img_dir,wanted)
+
+  missing<-wanted[!file_exists(paths)]
+  if(length(missing)>0){
+    message("Missing: ",paste(missing,collapse=", "))
+    return(NA_character_)
+  }
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=2,nrow=2,
+                  labels=c("A","B","C","D"),
+                  rel_widths=c(1,1),
+                  rel_heights=c(1,1),
+                  label_size=16)
+
+  out_file<-path(out_dir,out_name)
+  ggsave(out_file,grid,width=width,height=height,dpi=dpi,bg="white")
+  out_file
+}
+
+written<-save_grid_2x2(img_dir=img_dir,out_dir=out_dir)
+if(!is.na(written))message("Wrote: ",written)
+```
+
+## Compare cdhit trees colored by cluster 97,98,99 for HA only
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+base_dir<-"../2026-01-23_g1_trees_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+seg<-"HA"
+cutoffs<-seq(97,99,by=1)
+
+# helper: read TIFF -> ggplot object (optional crop top & bottom)
+img_to_gg<-function(img_path,crop_frac=0){
+  img<-magick::image_read(img_path)
+  info<-magick::image_info(img)
+  w<-info$width[1]
+  h<-info$height[1]
+
+  if(!is.null(crop_frac) && crop_frac>0){
+    crop_px<-round(h*crop_frac)
+    new_h<-h-(2*crop_px)
+    geom<-paste0(w,"x",new_h,"+0+",crop_px)
+    img<-magick::image_crop(img,geom)
+  }
+
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# build expected paths for HA TipColor tiffs
+expected_paths<-function(base_dir,seg,cutoffs){
+  # example file name:"../2026-01-23_g1_trees_out/HA_cdhit97_TipColor.tiff"
+  map_chr(cutoffs,~path(base_dir,paste0(seg,"_cdhit",.x,"_TipColor.tiff")))
+}
+
+# make labels like: A) 97%, ...
+panel_labels<-function(cutoffs){
+  letters3<-LETTERS[seq_along(cutoffs)]
+  paste0(letters3,") ",
+         formatC(cutoffs,format="f",digits=0),
+         "%")
+}
+
+save_ha_tree_row<-function(base_dir,out_dir,seg="HA",cutoffs=seq(97,99,1),
+                           width=6,height=4.2,dpi=300,
+                           out_name="cdhit_eval_trees_HA_composite.png"){
+
+  paths<-expected_paths(base_dir,seg,cutoffs)
+  missing<-paths[!file_exists(paths)]
+  if(length(missing)>0){
+    message("Missing files:\n",paste(missing,collapse="\n"))
+    return(NA_character_)
+  }
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=length(plots),
+                  labels=panel_labels(cutoffs),
+                  label_size=14,
+                  label_x=0.02,
+                  label_y=0.98,
+                  hjust=0,
+                  vjust=1)
+
+  out_file<-path(out_dir,out_name)
+  ggsave(out_file,grid,width=width,height=height,dpi=dpi,bg="white")
+  out_file
+}
+
+written<-save_ha_tree_row(base_dir=base_dir,out_dir=out_dir,seg=seg,cutoffs=cutoffs)
+if(!is.na(written))message("Wrote: ",written)
+```
+
+## Compare cdhit trees colored by cluster 97,98,99 for all 8 segments
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+base_dir<-"../2026-01-23_g1_trees_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA_seg","M","NS") # NA segment's TipColor tiffs are saved as "NA_seg" (avoids literal NA)
+cutoffs<-seq(97,99,by=1)
+
+# helper: read TIFF -> ggplot object (optional crop top & bottom)
+img_to_gg<-function(img_path,crop_frac=0){
+  img<-magick::image_read(img_path)
+  info<-magick::image_info(img)
+  w<-info$width[1]
+  h<-info$height[1]
+
+  if(!is.null(crop_frac) && crop_frac>0){
+    crop_px<-round(h*crop_frac)
+    new_h<-h-(2*crop_px)
+    geom<-paste0(w,"x",new_h,"+0+",crop_px)
+    img<-magick::image_crop(img,geom)
+  }
+
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# build expected paths for TipColor tiffs
+expected_paths<-function(base_dir,seg,cutoffs){
+  # example file name:"../2026-01-23_g1_trees_out/HA_cdhit97_TipColor.tiff"
+  map_chr(cutoffs,~path(base_dir,paste0(seg,"_cdhit",.x,"_TipColor.tiff")))
+}
+
+# make labels like: A) 97%, ...
+panel_labels<-function(cutoffs){
+  letters3<-LETTERS[seq_along(cutoffs)]
+  paste0(letters3,") ",
+         formatC(cutoffs,format="f",digits=0),
+         "%")
+}
+
+save_tree_row<-function(base_dir,out_dir,seg="HA",cutoffs=seq(97,99,1),
+                        width=6,height=4.2,dpi=300){
+
+  paths<-expected_paths(base_dir,seg,cutoffs)
+  missing<-paths[!file_exists(paths)]
+  if(length(missing)>0){
+    message(seg," missing files:\n",paste(missing,collapse="\n"))
+    return(NA_character_)
+  }
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=length(plots),
+                  labels=panel_labels(cutoffs),
+                  label_size=14,
+                  label_x=0.02,
+                  label_y=0.98,
+                  hjust=0,
+                  vjust=1)
+
+  out_name<-paste0("cdhit_eval_trees_",seg,"_composite.png")
+  out_file<-path(out_dir,out_name)
+  ggsave(out_file,grid,width=width,height=height,dpi=dpi,bg="white")
+  out_file
+}
+
+written<-map_chr(segs,~save_tree_row(base_dir=base_dir,out_dir=out_dir,seg=.x,cutoffs=cutoffs))
+
+ok<-written[!is.na(written)]
+bad<-segs[is.na(written)]
+
+if(length(ok)>0)message("Wrote:\n",paste(ok,collapse="\n"))
+if(length(bad)>0)message("Skipped (missing): ",paste(bad,collapse=", "))
+```
+
+## figure composite of trees at best cutoff 98%, all segments 
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+base_dir<-"../2026-01-23_g1_trees_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA_seg","M","NS")
+cutoff<-98
+
+# helper: read TIFF -> ggplot object (optional crop top & bottom)
+img_to_gg<-function(img_path,crop_frac=0){
+  img<-magick::image_read(img_path)
+  info<-magick::image_info(img)
+  w<-info$width[1]
+  h<-info$height[1]
+
+  if(!is.null(crop_frac) && crop_frac>0){
+    crop_px<-round(h*crop_frac)
+    new_h<-h-(2*crop_px)
+    geom<-paste0(w,"x",new_h,"+0+",crop_px)
+    img<-magick::image_crop(img,geom)
+  }
+
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames for one cutoff across segments
+expected_paths<-function(base_dir,segs,cutoff){
+  # example file name:"../2026-01-23_g1_trees_out/HA_cdhit98_TipColor.tiff"
+  map_chr(segs,~path(base_dir,paste0(.x,"_cdhit",cutoff,"_TipColor.tiff")))
+}
+
+# build combined grid
+save_allsegs_onecutoff<-function(base_dir,out_dir,segs,cutoff,
+                                 width=10,height=9,dpi=300){
+
+  paths<-expected_paths(base_dir,segs,cutoff)
+  missing<-segs[!file_exists(paths)]
+  if(length(missing)>0){
+    message("Missing segments: ",paste(missing,collapse=", "))
+    message("Missing files:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+    return(NA_character_)
+  }
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-paste0("cdhit",cutoff,"_trees_allsegs_comp.png")
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=width,height=height,dpi=dpi,bg="white")
+  out_file
+}
+
+written<-save_allsegs_onecutoff(base_dir=base_dir,out_dir=out_dir,segs=segs,cutoff=cutoff)
+if(!is.na(written))message("Wrote: ",written)
+```
+
+## CLUSTER SIZE DISTRIB ACROSS SEGS for the best cutoff 98% only
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-07-01_g1_eval_out"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+cutoff<-98
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames
+expected_paths<-function(img_dir,segs,cutoff){
+  # example file name:"../2026-07-01_g1_eval_out/logclustsize_HA_98_g1.tiff"
+  map_chr(segs,~path(img_dir,paste0("logclustsize_",.x,"_",cutoff,"_g1.tiff")))
+}
+
+# build combined grid
+save_grid<-function(img_dir,out_dir,segs,cutoff,
+                    width=8,height=3,dpi=300){
+
+  paths<-expected_paths(img_dir,segs,cutoff)
+  missing<-segs[!file_exists(paths)]
+  if(length(missing)>0){
+    message("Missing segments: ",paste(missing,collapse=", "))
+    message("Missing files:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+    return(NA_character_)
+  }
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-paste0("cdhit",cutoff,"_logclustsize_allsegs_comp.png")
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=width,height=height,dpi=dpi,bg="white")
+  out_file
+}
+
+written<-save_grid(img_dir=img_dir,out_dir=out_dir,segs=segs,cutoff=cutoff)
+if(!is.na(written))message("Wrote: ",written)
+```
+
+## CDHIT patristic distance dsitrib within genetic clusters
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-08-20_g1_trees_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames
+files<-paste0(segs,"_patdist_withinclades.tiff")
+paths<-path(img_dir,files)
+
+if(any(!file_exists(paths))){
+  message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+}else{
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-"allsegs_patdist_withinCDHIT_comp.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=8,height=3.5,dpi=600,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+## withn vs between cluster distribs
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-08-20_g1_trees_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames
+files<-paste0(segs,"_patdist_withinbetween.tiff")
+paths<-path(img_dir,files)
+
+if(any(!file_exists(paths))){
+  message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+}else{
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-"allsegs_patdist_withinbetweenCDHIT98_comp.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=8,height=3.5,dpi=600,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+
