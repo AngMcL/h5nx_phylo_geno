@@ -1,0 +1,497 @@
+---
+title: "Remove extreme H5Nx temporal/tree outliers"
+output: github_document
+date: "2025-04-07"
+---
+
+## Description
+* remove temporal outliers, targeting samples/seqeunces that are outliers in all segments
+
+## v2 changes
+* increase cutoff for pendant edge, and make relative to segment width: eg. 6% of 1000 sites = max 60 subs on terminal branch length. 
+* increase residuals rtt at 10 stdevs 
+* remove seqs from samples where any of the 8 segment sequences fail criteria
+
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libs
+```{r, message=F}
+library(Biostrings)
+library(tidyverse)
+library(gtools)
+library(ape)
+```
+
+## Ins and Outs
+```{r}
+# Input trees from fasttree, rooted using ape-rtt (or can specify tempest)
+f.in.tre<-paste0("../ft_rooted/2026-01-13_rooted/")
+trees.in<-list.files(f.in.tre,pattern = ".tre$",full.names = T)  %>% mixedsort()
+l.tre<-length(trees.in)
+
+# Filled in dates for incomplete, in decimal date format and tip names
+dates.in<-str_replace_all(trees.in, ".tre","_dates.csv")
+
+#tempest data: dist from root (slow to calculate here)
+resid.in<-str_replace_all(trees.in, ".tre",".tsv")
+
+#folder with alignments and meta corresponding to trees
+f.in.fasta<-"../../../data/04_clean-align/2026-01-12_clean_aligns_wg_out/cleaned_fasta/"
+fasta.in<-str_replace_all(trees.in, f.in.tre,f.in.fasta) %>% str_replace_all("_rooted.tre","_aligned.fasta")
+# file.exists(fasta.in)
+
+f.in.meta<-"../../../data/04_clean-align/2026-01-12_clean_aligns_wg_out/cleaned_meta/"
+meta.in<-str_replace_all(trees.in, f.in.tre,f.in.meta) %>%
+  str_replace_all("trim_nodup_nuc","merged_cleaned_filt_meta") %>%
+  str_replace_all("_rooted.tre",".csv")
+# file.exists(meta.in)
+
+# Output
+today<-Sys.Date()
+f.out<-paste0(today,"_rem-outliers/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+#subfolder for aligns, trees, resid, dates
+f.out2<-paste0(f.out,"rem_out/")
+if(!dir.exists(f.out2)){dir.create(f.out2)}
+
+all.out<-str_replace_all(trees.in, f.in.tre, f.out2)
+
+trees.out<-str_replace_all(all.out, ".tre","_rem.tre") 
+fasta.out<-str_replace_all(all.out, ".tre","_rem.fasta")
+dates.out<-str_replace_all(all.out, ".tre","_rem_dates.txt")
+resid.out<-str_replace_all(all.out, ".tre","_resid.csv")
+
+#figures out
+fig.out<-paste0(f.out,"figs/")
+if(!dir.exists(fig.out)){dir.create(fig.out)}
+
+#summary table out
+summ.table.out<-paste(f.out, "ExclSummary.csv",sep="")
+summ.table<-data.frame(trees=trees.in)
+
+#list of seq_news for outliers
+text.out<-paste0(f.out,today,"_outliers.txt")
+cat(paste0("Run date: ",today), file=text.out, sep="\n",append = F)
+```
+
+## Read in the trees, data
+```{r}
+dates.list<-resid<-nuc<-dates<-meta<-trees<-replicate(l.tre, vector())
+summ.table$ntip.start<-NA
+i=1
+for(i in 1:l.tre){
+  trees[[i]]<-ape::read.tree(trees.in[i]) 
+  meta[[i]]<-read.csv(file=meta.in[i],header=T)
+  dates[[i]]<-read.csv(dates.in[i],sep=",",header=T)
+  resid[[i]]<-read.table(file=resid.in[i] ,sep="\t",header=T)
+  nuc[[i]]<-Biostrings::readDNAStringSet(fasta.in[i]) ## change
+
+  #Join the decdates on by seq_new to meta 
+  colnames(resid[[i]])[1]<-"seq_new"
+  colnames(dates[[i]])<-c("seq_new","dec.date") #the actual decdate used in the fit for root
+  #check full match of resid (meta still includes dups and filtered out in clean_align)
+  all (resid[[i]]$seq_new %in% meta[[i]]$seq_new) # but resid should all be repped in meta
+  
+  resid[[i]]<-left_join(resid[[i]], dates[[i]], by="seq_new")
+  resid[[i]]<-left_join(resid[[i]], meta[[i]], by="seq_new")
+  
+  #log data
+  summ.table$ntip.start[i]<-Ntip(trees[[i]])
+  summ.table$width[i]<-width(nuc[[i]][1])
+}
+```
+
+## Root-to-tip regression before removals
+```{r}
+#prepare to pull model fits into summary table
+summ.table$modelfit.start<-NA
+summ.table$R2.start<-NA
+
+##  plot residuals by segment tree
+for (i in 1:l.tre){
+  segment<-resid[[i]]$segment[1]
+
+  #root-to-tip regression
+  lm<-summary(lm(resid[[i]]$distance ~ resid[[i]]$dec.date))
+  slope<-formatC(coef(lm)[[2]],format="e", digits=2)
+  slope.n<-coef(lm)[[2]] #numeric
+  int<-coef(lm)[[1]]
+  eq<-paste("y = ",slope," x + ",signif(int,digits=3),sep="")
+  R2<-signif(lm$adj.r.squared,digits = 3)
+  
+  #add these to the table
+  summ.table$modelfit.start[i]<-eq
+  summ.table$R2.start[i]<-R2    
+  
+  #set positions
+  min.x<-min(resid[[i]]$date)
+  max.y<-max(resid[[i]]$distance)
+  
+  #overlay line on scatter plot, colored by residual
+  ggplot(resid[[i]])+
+    geom_point(aes(x=date,y=distance, color=abs(residual)))+
+    scale_color_continuous(type = "viridis")+
+    labs(x="Year",y="Root-to-tip distance",color="Abs.value\nresidual",title=segment)+
+    theme_bw()+
+    geom_abline(slope=slope.n,intercept = int,color="black")+
+    annotate("text",label=paste("Adj.R^2=",R2,"\n",eq,sep=""),
+             x=min.x,y=max.y*0.98,vjust=1, hjust=0,color="black",size=3)
+  ggsave(paste(fig.out,"/TemporalSignalResidInclOutlier_",segment,".png",sep=""),
+         height=3,width=4,units="in")
+}
+```
+
+## These ****ing guys
+```{r}
+for (i in 1:l.tre){
+  theseguys<-str_which(resid[[i]]$seq_new, "EPI_ISL_19135474|EPI_ISL_17849995|EPI_ISL_19135515|EPI_ISL_17949824")
+  resid[[i]]$residual[theseguys] 
+  sd(resid[[i]]$residual)
+  #-0.01738875  1.13833709  1.14636784  1.15395083
+  #the resid of these guys is 10-20x higher than one std(resid)
+}
+```
+
+
+## Distribution of residuals
+```{r}
+n.dev<-10 #how many stdevs away allowable? (max)
+
+#Prepare to extract this into summary table
+summ.table$cutoff<-NA_real_
+summ.table$Ntip.residual.out<-NA_real_
+
+# Store per-segment outliers (long table)
+outlier_list<-vector("list", length = l.tre)
+
+## First: detect outliers per segment, plot, and record
+for (i in 1:l.tre){
+  segment<-resid[[i]]$segment[1]
+  cutoff<-n.dev*sd(resid[[i]]$residual,na.rm=T) 
+  out_idx<-which(abs(resid[[i]]$residual) > cutoff)
+
+  #calculate n cutoff (on negative or positive side)
+  n.cutoff<-length(out_idx)
+  
+  # Save to summary table
+  summ.table$cutoff[i]<-cutoff
+  summ.table$Ntip.residual.out[i]<-n.cutoff
+  
+  #density plot, colored by residual
+  min.x<-cutoff
+  max.y<-.95  
+  ggplot(resid[[i]])+
+    geom_density(aes(x=(residual), y=..scaled..))+
+    labs(x="Residual",y="Scaled density", title=segment)+
+    theme_bw()+
+    geom_vline(xintercept=cutoff,color="red",linetype=2)+
+    geom_vline(xintercept=cutoff,color="red",linetype=2)+
+    geom_vline(xintercept=-cutoff,color="red",linetype=2)+
+    annotate("text",label=paste("cutoff = ",signif(cutoff,digits=3),"\n", "n excluded = ",n.cutoff,sep=""),
+             x=min.x,y=max.y*0.98,hjust=0,color="black",size=3)
+  ggsave(paste(fig.out,"/densityResiduals_N-outliers_",segment,".png",sep=""),height=3,width=4,units="in")
+  
+  # Record outliers for this segment
+  if (n.cutoff > 0) {
+    outlier_list[[i]]<-resid[[i]] %>%
+      slice(out_idx) %>%
+      transmute(
+        segment = .data$segment,
+        seq_new = .data$seq_new,
+        residual = .data$residual,
+        cutoff = cutoff
+      )
+  } else {
+    outlier_list[[i]]<-resid[[i]][0, c("segment", "seq_new", "residual")] %>%
+      mutate(cutoff = cutoff)
+  }
+
+  # Log segment outliers (segment-specific list)
+  if (n.cutoff > 0) {
+    cat(paste0(
+        "\nSegment ", segment,
+        " temporal outliers flagged (segment-specific), cutoff=",
+        signif(cutoff, 3), ": ",
+        paste(resid[[i]]$seq_new[out_idx], collapse = ", ")
+      ),
+      file = text.out, sep = "\n", append = TRUE
+    )
+  } else {
+    cat(
+      paste0("\nSegment ", segment, " temporal outliers flagged: none (cutoff=", signif(cutoff, 3), ")"),
+      file = text.out, sep = "\n", append = TRUE
+    )
+  }
+}
+
+# Combine long table of all flagged seq_new across segments
+outlier_tbl<-bind_rows(outlier_list)
+
+#segment-level removal set
+bad.seqs.seg<-outlier_tbl %>%
+  distinct(seq_new) %>%
+  pull(seq_new)
+
+resid.all<-bind_rows(resid) %>% 
+  select(seq_new, sample)
+
+bad.samps<-resid.all %>% 
+  filter(seq_new %in% bad.seqs.seg) %>% 
+  distinct (sample) %>% 
+  pull(sample) #4 bad samples, 29 bad seqs within them
+
+#sample-level removal set
+bad.seqs<-resid.all %>% 
+  filter(sample %in% bad.samps) %>% 
+  pull(seq_new)
+length(bad.seqs) #32 =4*8
+
+#join the sample on to this
+outlier_tbl<-outlier_tbl %>% left_join (resid.all, by="seq_new")
+
+# Log the UNION list
+write.csv(outlier_tbl, paste0(f.out2, "outlier_tbl.csv"))
+
+# Apply removal everywhere:
+#filter meta, drop tips + filter resid rows by bad.seqs
+for (i in seq_len(l.tre)) {
+  meta[[i]]<-meta[[i]] %>% filter(!seq_new %in% bad.seqs)
+  # Drop tips that are both "bad" and actually present in the tree
+  if (!is.null(trees[[i]]) && length(bad.seqs) > 0) {
+    tips_present<-intersect(trees[[i]]$tip.label, bad.seqs)
+    if (length(tips_present) > 0) {
+      trees[[i]]<-ape::drop.tip(phy = trees[[i]], tip = tips_present)
+    }
+  }
+
+  # Filter resid rows (if any)
+  resid[[i]]<-resid[[i]] %>% filter(!seq_new %in% bad.seqs)
+}
+```
+
+# Exclude further based on pendant edge length (terminal branch leading to tip)
+## pendant edge length
+```{r}
+## calculate the pendant edge length (last branch leading to tip)
+pendant.edge <-function(tree, scale=F){
+  if(is.rooted(tree)==FALSE)
+    warning("A rooted phylogeny is required for meaningful output of this function", call.=FALSE)
+  if(scale==TRUE){
+    #Scale tree to have unit depth (for ultrametric tree) or scale all branches to unit length (for additive tree)
+    if(is.ultrametric(tree)==TRUE)
+      tree<- rescaleTree(tree, 1) else
+        tree$edge.length<- tree$edge.length/sum(tree$edge.length)
+  }
+  edge.index<-which(tree$edge[,2] %in% 1:length(tree$tip.label))
+  w<- as.data.frame(tree$edge.length[edge.index])
+  results<- cbind(tree$tip.label, w)
+  names(results)<- c("species", "w")
+  results
+}
+```
+
+## Plot and exclude outliers based on long pendant edge
+```{r}
+#calculate pendant edges and apply cutoff
+# max.muts<-100
+#instead of max muts, set muts as a percentage of width (scale with segment size)
+max.p.mut<-0.06 # max % of gene width can have novel mutations
+
+summ.table$max.p.mut<-max.p.mut
+summ.table$max.muts<-NA_integer_
+summ.table$Ntip.pendant.out<-NA_integer_
+
+# store per-segment pendant outliers
+pend_outlier_list<-vector("list", length = l.tre)
+
+for (i in 1:l.tre){
+  segment<-resid[[i]]$segment[1]
+  pendants<-pendant.edge(trees[[i]])
+  gene.width<-summ.table$width[i] #have to divide by width to get subs/site
+  max.muts<-max.p.mut*gene.width
+  pend.cutoff<-max.muts/gene.width
+
+  # align pendant edges to resid seq_new (some may be NA)
+  pend.var<-pendants[match(resid[[i]]$seq_new, pendants$species),]
+  out_idx<-which(!is.na(pend.var$w) & (pend.var$w > pend.cutoff))
+  n.cutoff<-length(out_idx)
+
+  #add to the summary table
+  summ.table$Ntip.pendant.out[i]<-n.cutoff
+  summ.table$max.muts[i]<-max.muts
+  
+  #density plot of # mutations on pend edges for this subvar
+  min.x<-max(pend.var$w, na.rm=T)
+  max.y<-.95
+  
+  ggplot(pend.var)+
+    geom_density(aes(x=round(w*gene.width), y=..scaled..))+
+    labs(x="Number of mutations on pendant edge",y="Scaled density")+
+    theme_bw()+
+    geom_vline(xintercept=max.muts,color="red",linetype=2)+
+    annotate("text",label=paste("cutoff = ",max.muts,"\n", "n excluded = ",n.cutoff,sep=""),
+             x=max.muts, y=0.95, hjust=0,color="black",size=3)+
+    ggtitle(segment)
+  ggsave(paste(fig.out,"/PendantEdges_N-outliers_",segment,".png",sep=""), height=3, width=4,units="in")
+
+  # record outliers for this segment (as a long table)
+  if (n.cutoff > 0) {
+    pend_outlier_list[[i]]<-data.frame(
+      segment = rep(segment,length(out_idx)),
+      seq_new = pend.var$species[out_idx],
+      pendant_muts = round(pend.var$w[out_idx] * gene.width),
+      pendant_rate = pend.var$w[out_idx],
+      pend_cutoff_rate = rep(pend.cutoff,length(out_idx)) )
+    cat(paste0("\nSegment ", segment,
+        " pendant-edge outliers flagged (segment-specific, >",
+        max.muts, " muts): ",
+        paste(pend.var$species[out_idx], collapse = ", ")  ),
+      file = text.out, sep = "\n", append = TRUE)
+  } else { pend_outlier_list[[i]]<-data.frame(
+      segment = character(0),
+      seq_new = character(0),
+      pendant_muts = integer(0),
+      pendant_rate = numeric(0),
+      pend_cutoff_rate = numeric(0),
+      stringsAsFactors = FALSE)
+
+    cat(paste0("\nSegment ", segment, " pendant-edge outliers flagged: none (cutoff=", max.muts, " muts)"),
+      file = text.out, sep = "\n", append = TRUE)
+  }
+}
+
+pend_outlier_tbl<-dplyr::bind_rows(pend_outlier_list)
+
+#segment-level removal set
+bad.seqs.seg.pend<-pend_outlier_tbl %>%
+  distinct(seq_new) %>%
+  pull(seq_new)
+
+bad.samps.pend<-resid.all %>% 
+  filter(seq_new %in% bad.seqs.seg.pend) %>% 
+  distinct (sample) %>% 
+  pull(sample) #4 bad samples, 29 bad seqs within them
+
+#sample-level removal set
+bad.seqs.pend<-resid.all %>% 
+  filter(sample %in% bad.samps.pend) %>% 
+  pull(seq_new)
+length(bad.seqs.pend) 
+
+#join the sample on to this
+pend_outlier_tbl<-pend_outlier_tbl %>% left_join (resid.all, by="seq_new")
+
+# Log the UNION list
+write.csv(pend_outlier_tbl, paste0(f.out2, "pend_outlier_tbl.csv"))
+
+#apply removal to tree and resid
+for (i in 1:l.tre) {
+  # only drop tips that are present in that segment tree
+  if (length(bad.seqs.pend) > 0) {
+    tips_present<-intersect(trees[[i]]$tip.label, bad.seqs.pend)
+    if (length(tips_present) > 0) {
+      trees[[i]]<-ape::drop.tip(phy = trees[[i]], 
+                                  tip = tips_present)
+    }
+  }
+  # filter residual df (if any)
+  resid[[i]]<-resid[[i]] %>% 
+    dplyr::filter(!seq_new %in% bad.seqs.pend)
+}
+
+```
+
+## Root-to-tip regression after removing outliers
+```{r}
+#pull model fits into summary table
+summ.table$modelfit.end<-NA
+summ.table$R2.end<-NA
+summ.table$slope.end<-NA
+
+for (i in 1:l.tre){
+  segment<-resid[[i]]$segment[1]
+
+  #root-to-tip regression
+  lm<-summary(lm(resid[[i]]$distance ~ resid[[i]]$date))
+  resid[[i]]$residual<-residuals(lm(resid[[i]]$distance ~ resid[[i]]$date))
+  slope<-formatC(coef(lm)[[2]],format="e", digits=2)
+  slope.n<-coef(lm)[[2]] #numeric
+  int<-coef(lm)[[1]]
+  eq<-paste("y = ",slope," x + ",signif(int,digits=3),sep="")
+  R2<-signif(lm$adj.r.squared,digits = 3)
+  
+  #set positions
+  min.x<-min(resid[[i]]$date)
+  max.y<-max(resid[[i]]$distance)
+
+  #overlay line on scatter plot, colored by residual
+  ggplot(resid[[i]])+
+    geom_point(aes(x=date,y=distance, color=abs(residual)))+
+    scale_color_continuous(type = "viridis")+
+    labs(x="Year",y="Root-to-tip distance",color="Abs.value\nresidual",title=segment)+
+    theme_bw()+
+    geom_abline(slope=slope.n,intercept = int,color="black")+
+    annotate("text",label=paste("Adj.R^2=",R2,"\n",eq,sep=""),x=min.x,y=max.y*0.98,vjust=1,hjust=0,color="black",size=3)
+  ggsave(paste(fig.out,"/TemporalSignalResidExclOutliers_",segment,".png",sep=""),height=3,width=4,units="in")
+  
+  #Add to summary table
+  summ.table$modelfit.end[i]<-eq
+  summ.table$R2.end[i]<-R2
+  summ.table$slope.end[i]<-slope.n
+  summ.table$ntip.final[i]<-nrow(resid[[i]])
+}
+
+#EXPORT SUMMARY TABLE
+write.csv(summ.table, summ.table.out, row.names=F)
+```
+
+## exclude outliers from alignment
+```{r}
+for(i in 1:l.tre){
+  #only keep the keepers
+  keep<-which(names(nuc[[i]])%in% trees[[i]]$tip.label)
+  nuc[[i]]<-nuc[[i]][keep]
+  # print(length(nuc[[i]])==Ntip(trees[[i]]))
+  ## naming order is the same in fasta and tree (for lsd2)
+  if(!all(names(nuc[[i]])==trees[[i]]$tip.label)){
+    #reorder the fasta to match tree
+    nuc[[i]]<-nuc[[i]][order(match(names(nuc[[i]]),
+                                   trees[[i]]$tip.label))]
+  }
+}
+```
+
+## export the trees, alignments, meta, datefiles
+```{r}
+for (i in 1:l.tre){
+  #full match if T
+  print(all(names(nuc[[i]])==trees[[i]]$tip.label)) 
+  print(all (resid[[i]]$seq_new %in% trees[[i]]$tip.label))
+
+  write.tree(trees[[i]], trees.out[i])
+  writeXStringSet(nuc[[i]],fasta.out[i])
+  write.csv(resid[[i]],resid.out[i]) #final meta of tips incl in tree, with residual fit
+  write.table(data.frame(node_name=resid[[i]]$seq_new,date=resid[[i]]$dec.date), 
+              dates.out[i], row.names=F, sep="\t", quote = F, col.names=F)
+}
+```
+
+## Check this out
+```{r}
+try<-nuc[[1]][which(names(nuc[[1]])=="EPI_ISL_20265648|2025|HA")]
+writeXStringSet(try,paste0(f.out2, "weirdHA.fasta"))
+# BLAST shows it is H3 (but its resid is not super high (pendant edge is though...))
+try2<-nuc[[1]][which(names(nuc[[1]])=="EPI_ISL_398008|2001-05-23|HA")]
+writeXStringSet(try2,paste0(f.out2, "weirdHA_2.fasta"))
+#H12?! butonly 96.% PI
+
+try3<-nuc[[1]][which(names(nuc[[1]])=="EPI_ISL_19410275|2023-01-23|HA")]
+writeXStringSet(try3,paste0(f.out2, "weirdHA_3.fasta"))
+#H9...
+```
+
+
