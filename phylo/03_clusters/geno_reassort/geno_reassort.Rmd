@@ -1,0 +1,206 @@
+---
+title: "geno_reassort"
+output: html_document
+date: "2026-07-01"
+---
+
+## Objectives
+* For each genotype (treecluster `tc_geno`, `genoflu_geno`, `genin_geno`), measure how
+  phylogenetically spread out the sequences it contains are, separately on each segment's
+  ML tree (within-genotype pairwise patristic distances).
+* Summarise the distribution of those distances by segment to reveal which segments carry
+  higher within-genotype diversity. TreeCluster genotypes are defined on all 8 segment
+  clusters, so they should look tight and similar across segments; GenoFlu/GenoIn resolve
+  fewer features, so they may be spread out on the segments they lump or ignore.
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+library(ape)
+library(castor)     # fast C++ pairwise patristic distances
+library(ggridges)   # ridgeline per-segment density plots
+```
+
+```{r}
+plot.theme <- theme(panel.grid.minor = element_blank(),
+                    panel.background = element_rect("grey95"),
+                    axis.line = element_line(colour = "black"),
+                    text = element_text(size = 10, face = "bold"),
+                    legend.text = element_text(size = 8),
+                    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+## ins/outs
+```{r}
+seg.order <- c("PB2", "PB1", "PA", "HA", "NP", "NA", "M", "NS")
+
+tree.dir  <- "../../02_iqtree/iq_gtrfr10_rooted"
+tree.tmpl <- "trim_nodup_nuc_%s_rooted_remiqtree_rooted.treefile"
+resid.dir <- "../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out"
+resid.tmpl<- "trim_nodup_nuc_%s_rooted_resid.csv"
+meta.in   <- "../../../data/08_clean-share/meta/metadata.csv"
+
+geno.cols <- c(tc = "tc_geno", genoflu = "genoflu_geno", genin = "genin_geno")
+drop.vals <- c("Not assigned", "[unassigned]", "")   # non-genotype labels to skip
+
+display.min.n <- 50     # genotypes shown in composite / summary display (still compute all n>=2)
+bg.seed       <- 1      # seed for the reproducible random background sample
+bg.sample.n   <- 5000   # tips sampled per segment to estimate the median background pairwise distance
+
+# segment colour scale (used everywhere segment is a colour)
+seg.colors <- setNames(
+  c("#4477AA","#66CCEE","#228833","#CCBB44","#EE6677","#AA3377","#BBBBBB","#000000"),
+  seg.order)
+
+today <- Sys.Date()
+f.out <- paste0(today, "_geno_reassort_out/")
+if (!dir.exists(f.out)) dir.create(f.out)
+```
+
+## Load trees + tip->sample->genotype maps
+```{r}
+meta <- read.csv(meta.in, check.names = FALSE)
+
+# one entry per segment: the tree, a tip->row-index lookup, a tip->genotypes table,
+# and the tree height (max root-to-tip branch-length distance) used to normalise.
+set.seed(bg.seed)   # one RNG stream for all background samples -> reproducible
+seg.data <- list()
+for (s in seg.order) {
+  tr <- read.tree(file.path(tree.dir, sprintf(tree.tmpl, s)))
+  rs <- read.csv(file.path(resid.dir, sprintf(resid.tmpl, s)), check.names = FALSE)
+
+  tips <- tibble(tip = tr$tip.label, idx = seq_along(tr$tip.label)) %>%
+    left_join(rs %>% select(tip = seq_new, sample), by = "tip") %>%
+    left_join(meta %>% select(all_of(c("sample", unname(geno.cols)))), by = "sample")
+
+  # median background pairwise distance from a random sample of tips = the per-segment
+  # scale that normalised distances are expressed relative to (1 = as spread as two
+  # random sequences on this segment). More subtype-robust than tree height.
+  bg.idx <- sample(Ntip(tr), min(bg.sample.n, Ntip(tr)))
+  bg.d   <- castor::get_all_pairwise_distances(tr, only_clades = bg.idx, check_input = FALSE)
+  bg.med <- median(bg.d[lower.tri(bg.d)])
+
+  seg.data[[s]] <- list(tree = tr, tips = tips,
+                        height = max(node.depth.edgelength(tr)[seq_len(Ntip(tr))]),
+                        bg_median = bg.med)
+  cat(sprintf("%-3s: %d tips | unmatched %d | height %.4f | bg median %.4f\n",
+              s, Ntip(tr), sum(is.na(tips$sample)), seg.data[[s]]$height, bg.med))
+}
+
+# per-segment scales (denominators) for transparency / comparison
+seg_scales <- tibble(segment = factor(seg.order, levels = seg.order),
+                     tree_height = map_dbl(seg.order, ~seg.data[[.x]]$height),
+                     bg_median   = map_dbl(seg.order, ~seg.data[[.x]]$bg_median),
+                     bg_sample_n = map_int(seg.order, ~min(bg.sample.n, Ntip(seg.data[[.x]]$tree))))
+write.csv(seg_scales, paste0(f.out, "segment_scales.csv"), row.names = FALSE)
+print(seg_scales)
+```
+
+# Within-genotype pairwise patristic distances
+```{r}
+# lower-triangle pairwise distances among a set of tip indices, on one segment tree (castor)
+pw_dists <- function(tree, idx) {
+  d <- castor::get_all_pairwise_distances(tree, only_clades = idx, check_input = FALSE)
+  d[lower.tri(d)]
+}
+
+# EXACT per-genotype x segment summary for one scheme (all genotypes with >=2 tips).
+# distances are RAW branch-length units (substitutions/site). Within a genotype all
+# sequences share a subtype, so there are no cross-subtype pairs inflating these, and
+# raw values are a fair read of within-genotype divergence per segment. (segment_scales.csv
+# records each segment's background scale for context, since segments evolve at different rates.)
+summarise_scheme <- function(geno_col) {
+  map_dfr(seg.order, function(s) {
+    sd <- seg.data[[s]]
+    tg <- sd$tips %>%
+      transmute(idx, geno = .data[[geno_col]]) %>%
+      filter(!is.na(geno), !geno %in% drop.vals)
+    groups <- split(tg$idx, tg$geno)
+    groups <- groups[lengths(groups) >= 2]
+    map_dfr(names(groups), function(g) {
+      dv <- pw_dists(sd$tree, groups[[g]])
+      # Faith's PD: total branch length of the minimal subtree spanning this genotype's
+      # tips on this segment's tree (independent of any clustering method's boundaries;
+      # this is the genotype LABEL's own phylogenetic span). keep.tip() on this small,
+      # single tip set is simplest/clearest here (unlike the cluster-level A1 addition,
+      # which needed the stamp-based tip-to-MRCA walk for speed across thousands of
+      # clusters at full scale).
+      sub_tree <- keep.tip(sd$tree, sd$tree$tip.label[groups[[g]]])
+      faith_pd <- sum(sub_tree$edge.length)
+      tibble(scheme = names(geno.cols)[geno.cols == geno_col],
+             geno = g, segment = s, n = length(groups[[g]]),
+             pd_min = min(dv), pd_mean = mean(dv), pd_median = median(dv), pd_max = max(dv),
+             faith_pd = faith_pd, faith_pd_per_tip = faith_pd / length(groups[[g]]))
+    })
+  })
+}
+
+t0 <- Sys.time()
+div_summary <- map_dfr(geno.cols, summarise_scheme) %>%
+  mutate(segment = factor(segment, levels = seg.order),
+         scheme  = factor(scheme,  levels = names(geno.cols)))
+cat("computed", nrow(div_summary), "geno x segment rows in",
+    round(as.numeric(Sys.time() - t0, units = "secs")), "s\n")
+
+write.csv(div_summary, paste0(f.out, "within_geno_pd_summary.csv"), row.names = FALSE)
+```
+
+# Composite: which segments carry higher within-genotype diversity
+```{r}
+# one point per genotype (its median within-genotype distance) -> distribution by segment,
+# per scheme. TreeCluster should be low+flat across segments; GenoFlu/GenoIn should spike
+# on the segments they resolve poorly. Shown for genotypes with n > display.min.n.
+comp <- div_summary %>% filter(n > display.min.n)
+
+# raw units: segments evolve at different rates, so cross-segment differences partly
+# reflect intrinsic rate (see segment_scales.csv); compare schemes within a segment.
+p_comp <- ggplot(comp, aes(x = segment, y = pd_median, fill = segment)) +
+  geom_violin(scale = "width", colour = NA, alpha = 0.5) +
+  geom_boxplot(width = 0.18, outlier.size = 0.4, alpha = 0.9) +
+  scale_fill_manual(values = seg.colors, guide = "none") +
+  facet_wrap(~scheme, ncol = 1, scales = "free_y") +
+  plot.theme +
+  labs(x = "segment",
+       y = paste0("within-genotype median pairwise patristic distance (subs/site, genos n>",
+                  display.min.n, ")"))
+ggsave(paste0(f.out, "composite_within_geno_pd_by_segment_scheme.tiff"),
+       p_comp, width = 8, height = 9, units = "in")
+```
+
+# Per-genotype distribution of pairwise distances, coloured by segment
+```{r}
+# ALL within-genotype pairwise distances for ONE genotype, across the 8 segment trees
+# (raw subs/site, no subsampling). Returns one row per pair per segment.
+geno_pairwise_long <- function(geno_col, geno_val) {
+  map_dfr(seg.order, function(s) {
+    sd  <- seg.data[[s]]
+    idx <- sd$tips$idx[which(sd$tips[[geno_col]] == geno_val)]
+    if (length(idx) < 2) return(NULL)
+    tibble(segment = s, dist = pw_dists(sd$tree, idx))
+  }) %>% mutate(segment = factor(segment, levels = rev(seg.order)))  # rev -> PB2 at top
+}
+
+# ridgeline: one density per segment, PB2 (top) -> NS (bottom), coloured by segment
+plot_geno_dist <- function(geno_col, geno_val, scheme_lab) {
+  d <- geno_pairwise_long(geno_col, geno_val)
+  p <- ggplot(d, aes(x = dist, y = segment, fill = segment)) +
+    geom_density_ridges(scale = 1.6, alpha = 0.8, linewidth = 0.4, colour = "grey30") +
+    scale_fill_manual(values = seg.colors, guide = "none") +
+    plot.theme +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+    labs(x = "within-genotype pairwise patristic distance (subs/site)", y = "segment")
+  ggsave(paste0(f.out, "geno_dist_", scheme_lab, "_", gsub("[^A-Za-z0-9]+", "-", geno_val), ".tiff"),
+         p, width = 8, height = 6, units = "in")
+  invisible(p)
+}
+
+# demonstrate on the largest few genotypes per scheme (n by distinct sequences)
+top_genos <- function(geno_col, k = 4) {
+  meta %>% filter(!.data[[geno_col]] %in% drop.vals, !is.na(.data[[geno_col]])) %>%
+    count(geno = .data[[geno_col]], sort = TRUE) %>% slice_head(n = k) %>% pull(geno)
+}
+for (sch in names(geno.cols)) {
+  for (g in top_genos(geno.cols[[sch]])) plot_geno_dist(geno.cols[[sch]], g, sch)
+}
+```

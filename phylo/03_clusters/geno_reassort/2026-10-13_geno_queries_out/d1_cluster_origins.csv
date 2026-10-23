@@ -1,0 +1,47 @@
+"geno","segment","cluster","n_focal","focal_first_date","n_seqs_total","n_tc_geno_total","first_date_total","first_by_continent","n_seqs_other","first_date_other","prior_days","other_genos","other_continents"
+"D1.1","PB2","PB2-145",1239,2024-01-01,1268,7,2024-01-01,"North America:2024-01-01",29,2024-10-22,-295,"Not assigned(19);D1.2(5);Minor97(5)","North America(29)"
+"D1.1","PB2","PB2-147",813,2024-01-01,817,1,2024-01-01,"North America:2024-01-01",4,2025-01-01,-366,"Not assigned(4)","North America(4)"
+"D1.1","PB2","PB2-161",510,2024-01-01,514,1,2024-01-01,"North America:2024-01-01",4,2024-12-12,-346,"Not assigned(4)","North America(4)"
+"D1.1","PB2","PB2-152",401,2024-01-01,404,1,2024-01-01,"North America:2024-01-01",3,2025-01-01,-366,"Not assigned(3)","North America(3)"
+"D1.1","PB2","PB2-144",242,2024-01-01,577,5,2024-01-01,"North America:2024-01-01",335,2024-01-01,0,"D1.3(328);Minor101(4);Not assigned(3)","North America(335)"
+"D1.1","PB2","PB2-148",126,2024-01-01,151,3,2024-01-01,"North America:2024-01-01",25,2024-01-01,0,"D1.3(23);Not assigned(2)","North America(25)"
+"D1.1","PB2","PB2-159",91,2024-01-01,91,1,2024-01-01,"North America:2024-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-150",37,2024-01-01,37,1,2024-01-01,"North America:2024-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-151",10,2024-01-01,10,1,2024-10-07,"North America:2024-10-07",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-154",10,2024-01-01,10,1,2024-11-08,"North America:2024-11-08",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-146",9,2024-01-01,9,1,2024-01-01,"North America:2024-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-157",9,2024-01-01,9,1,2024-01-01,"North America:2024-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-156",6,2024-01-01,6,1,2025-01-01,"North America:2025-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-149",5,2024-01-01,5,1,2024-11-01,"North America:2024-11-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-155",3,2024-01-01,3,1,2025-01-01,"North America:2025-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-160",3,2024-01-01,5,3,2024-01-01,"North America:2024-01-01",2,2024-12-12,-346,"Not assigned(2)","North America(2)"
+"D1.1","PB2","PB2-s",3,2024-01-01,293,273,1961-01-01,"Africa:1961-01-01;North America:1966-01-01;Europe:1973-01-01;Oceania:1975-01-01;Asia:1978-01-01;Central America:1998-01-01;Caribbean:2007-01-01;South America:2008-01-21",290,1961-01-01,23010,"Not assigned(285);B3.2(3);A2(1);Minor61(1)","Asia(168);North America(58);Europe(31);Africa(15)"
+"D1.1","PB2","PB2-142",2,2024-01-01,2,1,2024-01-01,"North America:2024-01-01",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-143",2,2024-01-01,3,2,2024-01-01,"North America:2024-01-01",1,2024-12-02,-336,"D1.3(1)","North America(1)"
+"D1.1","PB2","PB2-153",2,2024-01-01,2,1,2024-10-14,"North America:2024-10-14",0,NA,NA,NA,NA
+"D1.1","PB2","PB2-158",2,2024-01-01,2,1,2024-12-26,"North America:2024-12-26",0,NA,NA,NA,NA
+"D1.1","PB1","PB1-631",3525,2024-01-01,4970,89,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",1445,2021-10-28,795,"A3(963);D1.3(352);Not assigned(83);Minor100(13)","North America(795);Asia(622);Europe(28)"
+"D1.1","PA","PA-156",3525,2024-01-01,3941,40,2023-11-01,"North America:2023-11-01",416,2023-11-01,61,"D1.3(352);Not assigned(36);Minor100(13);Minor97(5)","North America(416)"
+"D1.1","HA","HA-445",3525,2024-01-01,5006,100,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",1481,2021-10-28,795,"A3(963);D1.3(352);Not assigned(118);Minor100(13)","North America(824);Asia(628);Europe(29)"
+"D1.1","NP","NP-111",3525,2024-01-01,3964,44,2023-08-31,"North America:2023-08-31",439,2023-08-31,123,"D1.3(352);Not assigned(49);Minor100(13);B3.12(10)","North America(439)"
+"D1.1","NA","NA-334",3525,2024-01-01,3589,37,2024-01-01,"North America:2024-01-01",64,2024-10-22,-295,"Not assigned(40);Minor100(13);D1.2(5);Minor97(5)","North America(64)"
+"D1.1","M","M-332",3525,2024-01-01,5013,99,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",1488,2021-10-28,795,"A3(963);D1.3(352);Not assigned(126);Minor100(13)","North America(820);Asia(636);Europe(32)"
+"D1.1","NS","NS-592",3525,2024-01-01,4382,70,2021-03-01,"Europe:2021-03-01;Asia:2021-11-25;North America:2022-01-01",857,2021-03-01,1036,"Not assigned(429);D1.3(352);A3(39);Minor100(13)","North America(476);Europe(354);Asia(27)"
+"D1.2","PB2","PB2-145",5,2024-10-22,1268,7,2024-01-01,"North America:2024-01-01",1263,2024-01-01,295,"D1.1(1239);Not assigned(19);Minor97(5)","North America(1263)"
+"D1.2","PB1","PB1-631",5,2024-10-22,4970,89,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",4965,2021-10-28,1090,"D1.1(3525);A3(963);D1.3(352);Not assigned(83)","North America(4315);Asia(622);Europe(28)"
+"D1.2","PA","PA-49",5,2024-10-22,9,5,2020-05-29,"North America:2020-05-29",4,2020-05-29,1607,"Not assigned(3);Minor95(1)","North America(4)"
+"D1.2","HA","HA-445",5,2024-10-22,5006,100,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",5001,2021-10-28,1090,"D1.1(3525);A3(963);D1.3(352);Not assigned(118)","North America(4344);Asia(628);Europe(29)"
+"D1.2","NP","NP-111",5,2024-10-22,3964,44,2023-08-31,"North America:2023-08-31",3959,2023-08-31,418,"D1.1(3525);D1.3(352);Not assigned(49);Minor100(13)","North America(3959)"
+"D1.2","NA","NA-334",5,2024-10-22,3589,37,2024-01-01,"North America:2024-01-01",3584,2024-01-01,295,"D1.1(3525);Not assigned(40);Minor100(13);Minor97(5)","North America(3584)"
+"D1.2","M","M-332",5,2024-10-22,5013,99,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",5008,2021-10-28,1090,"D1.1(3525);A3(963);D1.3(352);Not assigned(126)","North America(4340);Asia(636);Europe(32)"
+"D1.2","NS","NS-592",5,2024-10-22,4382,70,2021-03-01,"Europe:2021-03-01;Asia:2021-11-25;North America:2022-01-01",4377,2021-03-01,1331,"D1.1(3525);Not assigned(429);D1.3(352);A3(39)","North America(3996);Europe(354);Asia(27)"
+"D1.3","PB2","PB2-144",328,2024-01-01,577,5,2024-01-01,"North America:2024-01-01",249,2024-01-01,0,"D1.1(242);Minor101(4);Not assigned(3)","North America(249)"
+"D1.3","PB2","PB2-148",23,2024-01-01,151,3,2024-01-01,"North America:2024-01-01",128,2024-01-01,0,"D1.1(126);Not assigned(2)","North America(128)"
+"D1.3","PB2","PB2-143",1,2024-01-01,3,2,2024-01-01,"North America:2024-01-01",2,2024-01-01,0,"D1.1(2)","North America(2)"
+"D1.3","PB1","PB1-631",352,2024-01-01,4970,89,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",4618,2021-10-28,795,"D1.1(3525);A3(963);Not assigned(83);Minor100(13)","North America(3968);Asia(622);Europe(28)"
+"D1.3","PA","PA-156",352,2024-01-01,3941,40,2023-11-01,"North America:2023-11-01",3589,2023-11-01,61,"D1.1(3525);Not assigned(36);Minor100(13);Minor97(5)","North America(3589)"
+"D1.3","HA","HA-445",352,2024-01-01,5006,100,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",4654,2021-10-28,795,"D1.1(3525);A3(963);Not assigned(118);Minor100(13)","North America(3997);Asia(628);Europe(29)"
+"D1.3","NP","NP-111",352,2024-01-01,3964,44,2023-08-31,"North America:2023-08-31",3612,2023-08-31,123,"D1.1(3525);Not assigned(49);Minor100(13);B3.12(10)","North America(3612)"
+"D1.3","NA","NA-662",352,2024-01-01,1381,47,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",1029,2021-10-28,795,"A3(963);Not assigned(60);Minor105(3);Minor103(2)","Asia(618);North America(382);Europe(29)"
+"D1.3","M","M-332",352,2024-01-01,5013,99,2021-10-28,"Europe:2021-10-28;Asia:2021-11-25;North America:2022-01-01",4661,2021-10-28,795,"D1.1(3525);A3(963);Not assigned(126);Minor100(13)","North America(3993);Asia(636);Europe(32)"
+"D1.3","NS","NS-592",352,2024-01-01,4382,70,2021-03-01,"Europe:2021-03-01;Asia:2021-11-25;North America:2022-01-01",4030,2021-03-01,1036,"D1.1(3525);Not assigned(429);A3(39);Minor100(13)","North America(3649);Europe(354);Asia(27)"

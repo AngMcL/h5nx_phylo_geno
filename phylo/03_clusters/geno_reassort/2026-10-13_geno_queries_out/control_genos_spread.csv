@@ -1,0 +1,17 @@
+"scheme","geno","control","n_seqs","n_tc_geno","segment","n_clusters","id_range","span","ratio","scattered"
+"genoflu","A6","negative",315,1,"PB2",1,"PB2-575",1,1,FALSE
+"genoflu","A6","negative",315,1,"PB1",1,"PB1-626",1,1,FALSE
+"genoflu","A6","negative",315,1,"PA",1,"PA-506",1,1,FALSE
+"genoflu","A6","negative",315,1,"HA",1,"HA-449",1,1,FALSE
+"genoflu","A6","negative",315,1,"NP",1,"NP-451",1,1,FALSE
+"genoflu","A6","negative",315,1,"NA",1,"NA-276",1,1,FALSE
+"genoflu","A6","negative",315,1,"M",1,"M-284",1,1,FALSE
+"genoflu","A6","negative",315,1,"NS",1,"NS-420",1,1,FALSE
+"genoflu","B3.5","positive",153,4,"PB2",1,"PB2-137",1,1,FALSE
+"genoflu","B3.5","positive",153,4,"PB1",1,"PB1-111",1,1,FALSE
+"genoflu","B3.5","positive",153,4,"PA",2,"PA-634..PA-643",10,5,TRUE
+"genoflu","B3.5","positive",153,4,"HA",2,"HA-573..HA-579",7,3.5,TRUE
+"genoflu","B3.5","positive",153,4,"NP",1,"NP-112",1,1,FALSE
+"genoflu","B3.5","positive",153,4,"NA",2,"NA-699..NA-707",9,4.5,TRUE
+"genoflu","B3.5","positive",153,4,"M",3,"M-361..M-380",20,6.7,TRUE
+"genoflu","B3.5","positive",153,4,"NS",3,"NS-497..NS-528",32,10.7,TRUE
