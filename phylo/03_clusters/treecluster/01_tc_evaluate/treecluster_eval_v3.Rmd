@@ -1,0 +1,320 @@
+---
+title: "treecluster"
+output: html_document
+date: "2025-10-10"
+---
+
+# treecluster output evaluation
+
+## v3 changes
+* n clusters,mean and median size changed to not include singletons
+* make versions of eval plots that do not have legends (composite only has one legend) and additional plot for median
+* move composite plot inside and with seg_leg
+
+## Objectives
+* Read in the csv file to parse the clusters, members, size for range of thresholds and segments
+* Compare the different cutoffs and word lengths
+
+```{r}
+library(tidyverse)
+library(NatParksPalettes)
+library(gtools)
+library(cowplot)
+
+```
+
+#Ins and Outs
+```{r}
+files.in<-list.files("../00_tc_run/2026-02-09_ft_treecluster_maxclade_out/",pattern=".csv", full.names = T) %>% mixedsort()
+
+f.out<-paste0(Sys.Date(), "_treecluster_maxclade_eval_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+#plotting theme
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"), 
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+```
+
+## Loop over all files, plot results, extract a summary table 
+```{r}
+#Empty list to hold the files
+l.f<-length(files.in)
+summ.list<-replicate(n=l.f, vector())
+
+i=1
+for (i in 1:l.f){
+  
+  file.in<-files.in[i]
+  
+  tc <- read.csv(file.in, header = TRUE, sep="\t")
+  seg<-str_extract(file.in, paste0("(?<=", "\\/\\/", ").*?(?=", "_cluster_max", ")"))
+  method<-str_extract(file.in, paste0("(?<=", "\\_cluster_", ").*?(?=", "_t0\\.", ")")) #ie. maxclade
+  thresh<-str_extract(file.in, paste0("(?<=", "\\_t0", ").*?(?=", "\\.csv", ")")) #replaces thresh
+  thresh<-as.character(as.numeric(thresh))
+  colnames(tc)[str_which(colnames(tc),"Cluster")]<-"cluster"
+  
+  tc$method<-method #for future ref
+  tc$seg<-seg
+  tc$thresh<-thresh
+  
+  # anything assigned cluster -1 is a single: assign their own cluster
+  singlez<-which(tc$cluster==-1)  
+  tc$cluster[singlez]<-paste0("s_",1:length(singlez))
+  
+  #make a df of unique clusters, cluster size
+  tc.cl<-tc %>% group_by(cluster) %>% 
+    summarize(.groups="rowwise",
+              size=n()) 
+  
+  tc.cl<-tc.cl[order(tc.cl$size, decreasing = T),]
+  clust.ord<-tc.cl$cluster
+  tc.cl$cluster<-factor(tc.cl$cluster, levels=clust.ord)
+  tc.cl$method<-method #for future ref
+  tc.cl$seg<-seg
+  tc.cl$thresh<-thresh
+  
+  #Summarize entire treecluster run
+  tc.cl.summ<-as.data.frame(t(as.matrix(summary(tc.cl$size))))
+  tc.cl.summ$n.clusters<-nrow(tc.cl)
+  tc.cl.summ$n.singles<-length(which(tc.cl$size ==1))
+  tc.cl.summ$min.no.sing=min(tc.cl$size[which(tc.cl$size!=1)])
+  tc.cl.summ$sd=sd(tc.cl$size)
+  tc.cl.summ$method<-method
+  tc.cl.summ$seg<-seg
+  tc.cl.summ$thresh<-thresh
+  tc.cl.summ <- tc.cl.summ %>% 
+    mutate( #include no singles metrics
+      ratio.max.min = Max. / min.no.sing,
+      n.clusters.nosing = n.clusters - n.singles,
+      mean.nosing = mean(tc.cl$size[which(tc.cl$size != 1)]),
+      median.nosing = median(tc.cl$size[which(tc.cl$size != 1)]) )
+  
+  summ.list[[i]]<-tc.cl.summ
+  
+  key.features<-paste0("TreeCluster threshold: ",thresh,
+                       "\nN clusters: ",tc.cl.summ$n.clusters.nosing[1],
+                       "\nN singles: ",tc.cl.summ$n.singles[1],
+                       "\nMax size: ", tc.cl.summ$Max.[1],
+                       "\nMean size: ", sprintf("%.1f",tc.cl.summ$mean.nosing[1]),
+                       "\nMedian size: ", tc.cl.summ$median.nosing[1])
+  # tc.df<-data.frame(segment=seg)
+  
+  ## plot LOG cluster sizes and annotate run with key features (no single)
+  tc.cl %>%
+    filter(size!=1) %>%
+    ggplot()+
+      geom_bar(aes(x=cluster,y=log10(size), fill=cluster),stat="identity")+
+      scale_fill_viridis_d(option="D")+
+      labs(x="Cluster",y="Log10 (cluster size)")+
+      ggtitle(paste0("TreeCluster: ",seg, ", ", method, " method"))+
+      annotate(geom="label",x=tc.cl.summ$n.clusters.nosing*0.5, y=log10(tc.cl.summ$Max.), hjust=0, vjust=1, label=key.features)+
+      plot.theme+
+      theme(legend.position = "none", axis.text.x=element_blank())
+  ggsave(paste0(f.out, "logclustsize_",seg,"_", method,"_",thresh,".tiff"), height=3, width=5, units="in") 
+  
+   ## plot cluster sizes and annotate run with key features
+  tc.cl %>%
+    filter(size!=1) %>%
+    ggplot()+
+      geom_bar(aes(x=cluster,y=(size), fill=cluster),stat="identity")+
+      scale_fill_viridis_d(option="D")+
+      labs(x="Cluster",y="Cluster size")+
+      ggtitle(paste0("TreeCluster: ",seg, ", ", method, " method"))+
+      annotate(geom="label",x=tc.cl.summ$n.clusters.nosing*0.5, y=(tc.cl.summ$Max.), hjust=0, vjust=1, label=key.features)+
+      plot.theme+
+      theme(legend.position = "none", axis.text.x=element_blank())
+  ggsave(paste0(f.out, "clustsize_",seg,"_", method,"_",thresh,".tiff"), height=3, width=5, units="in") 
+  
+  #write tc to use for cluster identity
+  write.csv(tc, paste0(f.out, "tc-out_",seg,"_", method, "_",  thresh,".csv"))
+  
+  #write tc to use for cluster chars
+  write.csv(tc.cl, paste0(f.out, "tc-cl-out_",seg,"_",method, "_",  thresh,".csv"))
+} #end of loop across all the cluster files (outputs from treecluster for diff method)
+```
+
+## plot summ list by segment 
+```{r}
+# segment colors
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+segment.cols<-natparks.pals(name="Yellowstone", n=length(segments))
+segment.cols<-segment.cols[c(1,5,2,4,6,3,8,7)]
+names(segment.cols)<-segments
+
+## join all the elems into one df
+tc.cl.summ.all<-bind_rows(summ.list)
+tc.cl.summ.all<-tc.cl.summ.all %>% mutate(max.min.ratio = Max. / min.no.sing, remove=F)
+tc.cl.summ.all$seg<-factor(tc.cl.summ.all$seg, levels=segments)
+tc.cl.summ.all$thresh<-as.numeric(tc.cl.summ.all$thresh) 
+
+#plot by segment: n cluster nosing
+tc.cl.summ.all %>%
+  ggplot(aes(x=thresh, y=n.clusters.nosing, group=seg, color=seg)) +
+  geom_point()+
+  # geom_smooth(method = "loess", se = F, linewidth = )+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="N clusters (excl. singletons)", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, method, "_threshold_vs_Ncluster.nosing.tiff"),height=4,width=4)
+
+#plot by segment: n singles
+tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=n.singles, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="N singles", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, method,"_threshold_vs_Nsingle.tiff"),height=4,width=4)
+
+
+#plot by segment: mean size
+tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=mean.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Mean size (excl. singletons)", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, method,"_threshold_vs_meansize.tiff"),height=4,width=4)
+
+#plot by segment: median size
+tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=median.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Median size (excl. singletons)", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, method,"_threshold_vs_mediansize.tiff"),height=4,width=4)
+
+#plot by segment: max size
+tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=Max., group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Maximum size", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, method,"_threshold_vs_maxsize.tiff"),height=4,width=4)
+
+#plot by segment: max/min ratio
+tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=max.min.ratio, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Max/min (no singles) size", color="Segment")+
+  theme(legend.position = "top")
+ggsave(paste0(f.out, method,"_threshold_vs_maxminratio.tiff"),height=4,width=4)
+```
+
+## same plots,no legends
+```{r}
+#plot by segment: n cluster nosing
+p1<-tc.cl.summ.all %>%
+  ggplot(aes(x=thresh, y=n.clusters.nosing, group=seg, color=seg)) +
+  geom_point()+
+  # geom_smooth(method = "loess", se = F, linewidth = )+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="N clusters (excl. singletons)", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p1, paste0(f.out, method, "_threshold_vs_Ncluster.nosing_noleg.tiff"),height=3,width=4)
+
+#plot by segment: n singles
+p2<-tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=n.singles, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="N singletons", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p2,paste0(f.out, method,"_threshold_vs_Nsingle_noleg.tiff"),height=3,width=4)
+
+#plot by segment: mean size
+p3.2<-tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=mean.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Mean size (excl. singletons)", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p3.2, paste0(f.out, method,"_threshold_vs_meansize_noleg.tiff"),height=3,width=4)
+
+#plot by segment: median size
+p3<-tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=median.nosing, group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Median size (excl. singletons)", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p3,paste0(f.out, method,"_threshold_vs_mediansize_noleg.tiff"),height=3,width=4)
+
+#plot by segment: max size
+p4<-tc.cl.summ.all %>%
+  ggplot() +
+  geom_point(aes(x=thresh, y=Max., group=seg, color=seg))+
+  scale_color_manual(values=segment.cols)+
+  plot.theme+
+  labs(x="TreeCluster maximum tree distance (sub/site)", y="Maximum size", color="Segment")+
+  theme(legend.position = "none")
+ggsave(plot=p4, paste0(f.out, method,"_threshold_vs_maxsize_noleg.tiff"),height=3,width=4)
+
+## LEGEND ONLY
+plot_legend <- get_legend(p4+
+                            theme(legend.position = "top")+
+                            guides(color=guide_legend(nrow=1)))
+
+ggsave(filename = paste0(f.out,"seg_leg.tiff"),
+  plot = ggdraw(plot_legend), 
+  width = 8, 
+  height = 0.25, 
+  units = "in",
+  dpi = 300)
+```
+
+#composite plot 
+```{r}
+row1<-plot_grid(p1, p2, ncol=2,nrow=1, labels=c("A","B"),label_size = 16, align="hv")
+row2<-plot_grid(p3.2,p4, ncol=2,nrow=1, labels=c("C","D"),label_size = 16, align="hv")
+full_plot<-plot_grid(plot_legend, row1, row2, ncol=1, nrow=3,
+                     rel_heights = c(0.25,3,3), rel_widths = c(1,1,1),
+                     labels=NULL)
+
+ggsave(plot = full_plot,filename = paste0(f.out, "composite_size_vs_thresh.tiff"),
+       width=8,height=6.25,bg="white")
+```
+
+# Write csv
+```{r}
+#write tc to use for cluster chars
+write.csv(tc.cl.summ.all, paste0(f.out,method,"_tc-cl-summaries-out.csv"))
+
+#top choice only:
+tc.cl.summ.all.04<-tc.cl.summ.all %>%
+  filter(thresh==0.04) 
+
+write.csv(tc.cl.summ.all.04, paste0(f.out,method,"_tc-cl-summaries-out_0.04.csv"))
+```
+
+#Range of metrics to report
+```{r}
+range(tc.cl.summ.all.04$n.clusters) #530 1052
+range(tc.cl.summ.all.04$n.clusters.nosing) #399 708
+range(tc.cl.summ.all.04$n.singles) #131 344
+range(tc.cl.summ.all.04$min.no.sing) #2:2
+range(tc.cl.summ.all.04$Mean) #39.32129 78.04906
+range(tc.cl.summ.all.04$Median) #3-4
+range(tc.cl.summ.all.04$mean.nosing) #  57.94068 103.34586
+range(tc.cl.summ.all.04$median.nosing) # 5 10
+range(tc.cl.summ.all.04$Max) #3941 6355
+```
+
+
