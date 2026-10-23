@@ -1,0 +1,499 @@
+---
+title: "subtree_cluster_matrix"
+output: html_document
+date: "2026-05-27"
+---
+
+## Objectives
+* Compare treecluster genotypes (`tc_geno`) and GenoFlu genotypes (`genoflu_geno`) in a concordance matrix
+* Sweep every unique combination of genotype-count and tc_geno-count thresholds (`thresh.vec`); each combination is saved as its own matrix with both thresholds in the file name
+* Cells coloured and annotated by number of sequences
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+```
+
+```{r}
+plot.theme <- theme(panel.grid.minor = element_blank(),
+                    panel.background = element_rect("grey95"),
+                    axis.line = element_line(colour = "black"),
+                    text = element_text(size = 10, face = "bold"),
+                    legend.text = element_text(size = 8),
+                    axis.text.x = element_text(angle = 15, hjust = 1, vjust = 1))
+```
+
+## ins/outs
+```{r}
+# every output is generated for all unique combinations of these thresholds:
+# thresh.geno (genoflu_geno / genin_geno) x thresh.tc (tc_geno)
+thresh.geno <- c(100, 500, 1000, 10000)   # genotype (genoflu / genin) minimum total sequences
+thresh.tc   <- c(10, 50, 100, 500)        # tc_geno minimum total sequences
+
+meta.in <- "../../../data/08_clean-share/meta/metadata.csv"
+
+today <- Sys.Date()
+f.out <- paste0(today, "_subtree_cluster_matrix_out/")
+if (!dir.exists(f.out)) {dir.create(f.out)}
+```
+
+## Read in data
+```{r}
+meta <- read.csv(meta.in)
+
+seg.order <- c("PB2", "PB1", "PA", "HA", "NP", "NA", "M", "NS")
+seg.cols  <- paste0("genoflu_cluster", seg.order, "_filled")
+
+meta <- meta %>%
+  mutate(genoflu_geno_longform = apply(
+    across(all_of(seg.cols)), 1,
+    function(x) paste(paste0(seg.order, "-", x), collapse = "_")
+  ))
+
+df <- meta %>%
+  select(tc_geno, genoflu_geno, genoflu_geno_longform, tc_clusterHA) %>%
+  filter(!is.na(tc_geno), !is.na(genoflu_geno), tc_geno != "", genoflu_geno != "",
+         genoflu_geno != "Not assigned")
+
+cat("Sequences with both labels:", nrow(df), "\n")
+```
+
+## Concordance plot function
+```{r}
+# data must contain columns: tc_geno, geno, geno_longform
+# builds one tc_geno x geno concordance matrix for a single (min.seqs.x, min.seqs.tc)
+# pair and saves it; file name carries both thresholds. returns the plot invisibly.
+# highlight.genos (optional): draws a dark-red outline rectangle around the full
+# span of cells (all tc_geno rows with data) for each named geno column, and adds
+# "_highlight" to the output file name.
+# cell.text.size: geom_text size (mm) of the per-cell counts.
+# dpi: export resolution (the highlight versions feed the 450 dpi composite).
+plot_concordance <- function(data, min.seqs.x, min.seqs.tc, x.lab, file.prefix,
+                             highlight.genos = NULL,
+                             highlight.color = "darkred",
+                             highlight.linewidth = 1.2,
+                             cell.text.size = 2.5,
+                             dpi = 300) {
+  geno_keep <- data %>% count(geno)    %>% filter(n >= min.seqs.x)  %>% pull(geno)
+  tc_keep   <- data %>% count(tc_geno) %>% filter(n >= min.seqs.tc) %>% pull(tc_geno)
+
+  cat(file.prefix, "| x>=", min.seqs.x, "kept", length(geno_keep),
+      "| tc>=", min.seqs.tc, "kept", length(tc_keep), "\n")
+  if (length(geno_keep) == 0 || length(tc_keep) == 0) return(invisible(NULL))
+
+  # tc_geno y-order: proper influenza segment order PB2,PB1,PA,HA,NP,NA,M,NS
+  # split the tc_geno string into its 8 segment clusters and sort by their numbers in
+  # turn (singleton "-s" buckets parse to NA and sort last). desc() so the lowest
+  # numbers sit at the top of the plot.
+  tc_segs <- paste0("n", seg.order)   # seg.order = PB2,PB1,PA,HA,NP,NA,M,NS
+  tc_order <- data %>%
+    filter(tc_geno %in% tc_keep) %>%
+    distinct(tc_geno) %>%
+    separate(tc_geno, into = tc_segs, sep = "_", remove = FALSE) %>%
+    mutate(across(all_of(tc_segs), ~as.numeric(str_extract(.x, "\\d+$")))) %>%
+    arrange(desc(nPB2), desc(nPB1), desc(nPA), desc(nHA),
+            desc(nNP), desc(nNA), desc(nM), desc(nNS)) %>%
+    pull(tc_geno)
+
+  # combined x-axis label: short alias + newline + modal longform
+  geno_labels <- data %>%
+    filter(geno %in% geno_keep) %>%
+    group_by(geno) %>%
+    summarise(geno_longform = names(sort(table(geno_longform), decreasing = TRUE))[1],
+              .groups = "drop") %>%
+    mutate(geno_label = paste0(geno, "\n", geno_longform))
+
+  mat <- data %>%
+    filter(geno %in% geno_keep, tc_geno %in% tc_keep) %>%
+    count(tc_geno, geno) %>%
+    left_join(geno_labels, by = "geno") %>%
+    mutate(tc_geno    = factor(tc_geno,    levels = tc_order),
+           geno_label = factor(geno_label, levels = geno_labels$geno_label))
+
+  n.tc     <- n_distinct(mat$tc_geno)
+  p.height <- max(6, n.tc * 0.2)   # 0.2 in per tc_geno row, minimum 6 in
+
+  p <- ggplot(mat, aes(x = geno_label, y = tc_geno, fill = n)) +
+    geom_tile(colour = "white", linewidth = 0.4) +
+    geom_text(aes(label = n), size = cell.text.size, fontface = "bold") +
+    scale_fill_distiller(palette = "Blues", direction = 1, name = "n seqs") +
+    plot.theme +
+    labs(x = paste0(x.lab, " [N>=", min.seqs.x, "]"),
+         y = paste0("Treecluster genotype [N>=", min.seqs.tc, "]"))
+
+  file.suffix <- ""
+  if (!is.null(highlight.genos)) {
+    # bounding box (in on-plot axis-index coordinates) around every cell a
+    # highlighted geno has data in. ggplot's discrete scales DROP unused factor
+    # levels by default, so a geno/tc_geno kept by its own count threshold but
+    # with zero rows in `mat` (all its partner cells fell below the OTHER
+    # threshold) never gets an axis slot -- indexing into the full tc_order /
+    # geno_labels vectors would then be off by however many such gaps precede
+    # it. Index into the levels that actually appear in `mat` instead, so the
+    # box lines up with what's actually drawn.
+    x.present <- levels(droplevels(mat$geno_label))
+    y.present <- levels(droplevels(mat$tc_geno))
+    highlight_box <- function(g) {
+      x.label <- geno_labels$geno_label[geno_labels$geno == g]
+      x.pos   <- match(x.label, x.present)
+      y.idx   <- match(mat$tc_geno[mat$geno == g], y.present)
+      if (length(x.pos) == 0 || is.na(x.pos) || length(y.idx) == 0) return(NULL)
+      data.frame(xmin = x.pos - 0.5, xmax = x.pos + 0.5,
+                 ymin = min(y.idx) - 0.5, ymax = max(y.idx) + 0.5)
+    }
+    boxes <- map_dfr(highlight.genos, highlight_box)
+    if (nrow(boxes) > 0) {
+      p <- p + geom_rect(data = boxes,
+                         aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                         inherit.aes = FALSE, colour = highlight.color,
+                         fill = NA, linewidth = highlight.linewidth)
+    }
+    file.suffix <- "_highlight"
+  }
+
+  ggsave(paste0(f.out, file.prefix, "_", min.seqs.x, "_", min.seqs.tc, file.suffix, ".tiff"),
+         plot = p, width = 12, height = p.height, units = "in", dpi = dpi)
+
+  invisible(p)
+}
+
+# all unique (genotype, tc_geno) threshold combinations
+combos <- expand.grid(min.seqs.x = thresh.geno, min.seqs.tc = thresh.tc)
+cat("threshold combinations per genotype scheme:", nrow(combos), "\n")
+```
+
+# GenoFlu vs Treecluster genotype matrix
+```{r}
+df.geno <- df %>% rename(geno = genoflu_geno, geno_longform = genoflu_geno_longform)
+
+# threshold combo used for the manuscript composite figure -- also gets a
+# highlighted version outlining the B3.13 and D1.1 columns
+composite.geno <- list(min.seqs.x = 500, min.seqs.tc = 50)
+
+for (i in seq_len(nrow(combos))) {
+  plot_concordance(df.geno,
+                   min.seqs.x  = combos$min.seqs.x[i],
+                   min.seqs.tc = combos$min.seqs.tc[i],
+                   x.lab       = "GenoFlu genotype",
+                   file.prefix = "tc_geno_vs_genoflu_geno_matrix")
+
+  if (combos$min.seqs.x[i] == composite.geno$min.seqs.x &&
+      combos$min.seqs.tc[i] == composite.geno$min.seqs.tc) {
+    plot_concordance(df.geno,
+                     min.seqs.x  = combos$min.seqs.x[i],
+                     min.seqs.tc = combos$min.seqs.tc[i],
+                     x.lab       = "GenoFlu genotype",
+                     file.prefix = "tc_geno_vs_genoflu_geno_matrix",
+                     highlight.genos = c("B3.13", "D1.1"),
+                     cell.text.size  = 3.5,
+                     dpi             = 450)
+  }
+}
+```
+
+# Genin vs Treecluster genotype matrix
+```{r}
+genin.seg.order <- c("PB2", "PB1", "PA", "NP", "NA", "M", "NS")
+genin.seg.cols  <- paste0("genin_cluster", genin.seg.order)
+
+df.genin <- meta %>%
+  mutate(geno_longform = apply(
+    across(all_of(genin.seg.cols)), 1,
+    function(x) paste(paste0(genin.seg.order, "-", x), collapse = "_")
+  )) %>%
+  rename(geno = genin_geno) %>%
+  select(tc_geno, geno, geno_longform) %>%
+  filter(!is.na(tc_geno), !is.na(geno), tc_geno != "", geno != "",
+         geno != "[unassigned]")
+
+cat("Sequences with both labels:", nrow(df.genin), "\n")
+
+# threshold combo used for the manuscript composite figure -- also gets a
+# highlighted version outlining the EA-2020-C column
+composite.genin <- list(min.seqs.x = 100, min.seqs.tc = 50)
+
+for (i in seq_len(nrow(combos))) {
+  plot_concordance(df.genin,
+                   min.seqs.x  = combos$min.seqs.x[i],
+                   min.seqs.tc = combos$min.seqs.tc[i],
+                   x.lab       = "Genin2 genotype",
+                   file.prefix = "tc_geno_vs_genin_geno_matrix")
+
+  if (combos$min.seqs.x[i] == composite.genin$min.seqs.x &&
+      combos$min.seqs.tc[i] == composite.genin$min.seqs.tc) {
+    plot_concordance(df.genin,
+                     min.seqs.x  = combos$min.seqs.x[i],
+                     min.seqs.tc = combos$min.seqs.tc[i],
+                     x.lab       = "Genin2 genotype",
+                     file.prefix = "tc_geno_vs_genin_geno_matrix",
+                     highlight.genos = "EA-2020-C",
+                     cell.text.size  = 3.5,
+                     dpi             = 450)
+  }
+}
+```
+
+# Summary table: treecluster clusters per genotype
+```{r}
+# For each genoflu / genin genotype: per-segment number of distinct treecluster
+# clusters (tc_cluster{SEG}), the range of those cluster identifiers, the span of
+# that range (max - min + 1) and span / n_clusters (1 decimal), plus the number of
+# distinct whole-genome treecluster genotypes (tc_geno) and sequences.
+# Singleton "-s" buckets carry no number and are excluded from the cluster count,
+# range, span and ratio; a segment whose only cluster is the singleton bucket gets
+# n_clusters = 0 and NA range/span/ratio.
+# No N threshold here — this summarises all assigned sequences.
+
+# numeric tc_cluster IDs in one segment for one genotype (singletons dropped)
+cluster_nums <- function(ids) {
+  sort(unique(as.numeric(str_extract(unique(ids), "\\d+$"))))
+}
+
+# formats the range of numeric tc_cluster identifiers
+range_str <- function(nums, seg) {
+  if (length(nums) == 0) return(NA_character_)
+  if (length(nums) == 1) return(paste0(seg, "-", nums))
+  paste0(seg, "-", min(nums), "..", seg, "-", max(nums))
+}
+
+summarise_scheme <- function(data, geno_col, segs, scheme, drop_vals) {
+  d <- data %>%
+    rename(geno = all_of(geno_col)) %>%
+    filter(!is.na(geno), geno != "", !geno %in% drop_vals,
+           !is.na(tc_geno), tc_geno != "")
+
+  base <- d %>%
+    group_by(geno) %>%
+    summarise(n_seqs = n(), n_tc_geno = n_distinct(tc_geno), .groups = "drop")
+
+  seg_long <- map_dfr(segs, function(s) {
+    col <- paste0("tc_cluster", s)
+    d %>%
+      group_by(geno) %>%
+      summarise(nums = list(cluster_nums(.data[[col]])), .groups = "drop") %>%
+      mutate(segment    = s,
+             n_clusters = lengths(nums),
+             id_range   = map_chr(nums, range_str, seg = s),
+             span       = map_dbl(nums, ~ if (length(.x)) max(.x) - min(.x) + 1 else NA_real_),
+             ratio      = round(span / n_clusters, 1)) %>%
+      select(-nums)
+  })
+
+  seg_wide <- seg_long %>%
+    pivot_wider(names_from = segment, values_from = c(n_clusters, id_range, span, ratio),
+                names_glue = "{segment}_{.value}")
+
+  col_order <- c(rbind(paste0(segs, "_n_clusters"), paste0(segs, "_id_range"),
+                       paste0(segs, "_span"), paste0(segs, "_ratio")))
+  base %>%
+    left_join(seg_wide, by = "geno") %>%
+    transmute(scheme = scheme, geno, n_seqs, n_tc_geno, !!!syms(col_order)) %>%
+    arrange(desc(n_seqs))
+}
+
+genoflu.segs <- c("PB2", "PB1", "PA", "HA", "NP", "NA", "M", "NS")
+genin.segs   <- c("PB2", "PB1", "PA", "NP", "NA", "M", "NS")   # genin assigns no HA
+
+geno_summary <- bind_rows(
+  summarise_scheme(meta, "genoflu_geno", genoflu.segs, "genoflu", "Not assigned"),
+  summarise_scheme(meta, "genin_geno",   genin.segs,   "genin",   "[unassigned]")
+)
+
+write.csv(geno_summary, paste0(f.out, "geno_tc_cluster_summary.csv"), row.names = FALSE)
+cat("wrote", paste0(f.out, "geno_tc_cluster_summary.csv"),
+    "with", nrow(geno_summary), "genotype rows\n")
+```
+
+# Summary table: unexpectedly wide cluster ID ranges (possible reassortment signal)
+```{r}
+# For predominant genotypes (n_seqs >= min.seqs.spread), per segment: how far apart
+# the NUMERIC tc_cluster IDs are (span = max - min + 1) relative to how many
+# distinct numeric clusters are actually present (n_numeric_clusters). A high
+# span/n_numeric_clusters ratio means that genotype's sequences for that segment
+# are scattered across a wide swath of the segment's tree rather than clustered
+# together in adjacent tree_cluster IDs -- worth a look for reassortment or
+# phylogenetic incongruence. Singleton "-s" buckets are excluded from the numeric
+# span/count (same convention as id_range above) but flagged via has_singleton.
+# Only ranges spanning >=3 cluster IDs are reported. Separate file from, and does
+# NOT modify, geno_tc_cluster_summary.csv.
+
+min.seqs.spread <- 100
+
+spread_scheme <- function(data, geno_col, segs, scheme, drop_vals) {
+  d <- data %>%
+    rename(geno = all_of(geno_col)) %>%
+    filter(!is.na(geno), geno != "", !geno %in% drop_vals,
+           !is.na(tc_geno), tc_geno != "")
+
+  n_seqs_tab <- d %>% count(geno, name = "n_seqs") %>% filter(n_seqs >= min.seqs.spread)
+
+  map_dfr(segs, function(s) {
+    col <- paste0("tc_cluster", s)
+    d %>%
+      filter(geno %in% n_seqs_tab$geno) %>%
+      group_by(geno) %>%
+      summarise(nums = list(sort(as.numeric(str_extract(unique(.data[[col]]), "\\d+$")))),
+                has_singleton = any(str_detect(.data[[col]], "-s$")),
+                .groups = "drop") %>%
+      mutate(n_numeric_clusters = lengths(nums),
+             min_id = map_dbl(nums, ~ if (length(.x)) min(.x) else NA_real_),
+             max_id = map_dbl(nums, ~ if (length(.x)) max(.x) else NA_real_),
+             span   = max_id - min_id + 1,
+             ratio  = span / n_numeric_clusters) %>%
+      filter(!is.na(span), span >= 3) %>%
+      transmute(scheme = scheme, geno, segment = s, n_numeric_clusters, has_singleton,
+                min_id, max_id, span, ratio) %>%
+      left_join(n_seqs_tab, by = "geno") %>%
+      relocate(n_seqs, .after = geno)
+  })
+}
+
+geno_spread <- bind_rows(
+  spread_scheme(meta, "genoflu_geno", genoflu.segs, "genoflu", "Not assigned"),
+  spread_scheme(meta, "genin_geno",   genin.segs,   "genin",   "[unassigned]")
+) %>%
+  arrange(desc(ratio))
+
+write.csv(geno_spread, paste0(f.out, "geno_tc_cluster_spread.csv"), row.names = FALSE)
+cat("wrote", paste0(f.out, "geno_tc_cluster_spread.csv"),
+    "with", nrow(geno_spread), "genotype-segment rows (n_seqs >=", min.seqs.spread,
+    ", span >= 3)\n")
+```
+
+# Cluster sharing / reassortment between treecluster genotypes
+```{r}
+# For every tc_geno: its earliest collection date, and for each of its 8 segment
+# clusters whether that exact cluster appears in any OTHER tc_geno, who shares it,
+# and which sharer is earliest (origin) vs latest (recipient). Singleton "-s"
+# buckets are NOT treated as shared (they aggregate unrelated singletons), so a
+# cluster must be numeric to count as identical across genotypes.
+
+tc.seg.order <- c("PB2", "PB1", "PA", "HA", "NP", "NA", "M", "NS")
+tc.cols      <- paste0("tc_cluster", tc.seg.order)
+
+# collection_date is mixed precision (YYYY, YYYY-MM, YYYY-MM-DD); parse to the
+# earliest possible day so partial dates still sort sensibly for "earliest".
+parse_date_lb <- function(x) {
+  x <- ifelse(nchar(x) == 4, paste0(x, "-01-01"),
+       ifelse(nchar(x) == 7, paste0(x, "-01"), x))
+  as.Date(x)
+}
+meta <- meta %>% mutate(coll_lb = parse_date_lb(collection_date))
+
+# one row per tc_geno (the 8 cluster values are constant within a tc_geno by construction)
+geno_tab <- meta %>%
+  group_by(tc_geno) %>%
+  summarise(alias         = first(treecluster_genotype_alias),
+            earliest_date = min(coll_lb, na.rm = TRUE),
+            n_seqs        = n(),
+            across(all_of(tc.cols), first),
+            .groups = "drop")
+
+# tc_geno x segment long form
+long <- geno_tab %>%
+  select(tc_geno, alias, earliest_date, all_of(tc.cols)) %>%
+  pivot_longer(all_of(tc.cols), names_to = "segment", values_to = "cluster") %>%
+  mutate(segment      = factor(str_remove(segment, "tc_cluster"), levels = tc.seg.order),
+         is_singleton = str_detect(cluster, "-s$"))
+
+# sharing among numeric clusters only; origin = earliest sharer, recipient = latest sharer
+shared <- long %>%
+  filter(!is_singleton) %>%
+  group_by(segment, cluster) %>%
+  mutate(n_genos         = n(),
+         shared          = n_genos > 1,
+         other_aliases   = vapply(seq_len(n()), function(i) paste(alias[-i], collapse = ";"), character(1)),
+         origin_alias    = alias[which.min(earliest_date)],
+         origin_date     = min(earliest_date),
+         recipient_alias = alias[which.max(earliest_date)],
+         recipient_date  = max(earliest_date)) %>%
+  ungroup() %>%
+  mutate(across(c(other_aliases, origin_alias, recipient_alias),
+                ~if_else(shared, ., NA_character_)),
+         origin_date    = if_else(shared, origin_date, as.Date(NA)),
+         recipient_date = if_else(shared, recipient_date, as.Date(NA)),
+         focal_role     = case_when(!shared ~ "unique",
+                                    alias == origin_alias    ~ "origin",
+                                    alias == recipient_alias ~ "recipient",
+                                    TRUE ~ "intermediate"))
+
+sharing <- long %>%
+  left_join(shared %>% select(tc_geno, segment, cluster, n_genos, shared, other_aliases,
+                              origin_alias, origin_date, recipient_alias, recipient_date, focal_role),
+            by = c("tc_geno", "segment", "cluster")) %>%
+  mutate(n_other_genos = ifelse(is_singleton, NA, pmax(n_genos - 1, 0)),
+         shared        = ifelse(is_singleton, NA, shared)) %>%
+  transmute(alias, tc_geno, earliest_date, segment, cluster, is_singleton,
+            shared, n_other_genos, other_aliases,
+            origin_alias, origin_date, recipient_alias, recipient_date, focal_role) %>%
+  arrange(earliest_date, alias, segment)
+
+write.csv(sharing, paste0(f.out, "tc_geno_segment_sharing.csv"), row.names = FALSE)
+cat("wrote", paste0(f.out, "tc_geno_segment_sharing.csv"), "with", nrow(sharing), "tc_geno x segment rows\n")
+
+# per-tc_geno: which/how many genoflu + genin genotypes were assigned to the same
+# rows (counts in parentheses). "Not assigned" / "[unassigned]" ARE counted as a
+# genotype here (only blank/NA dropped).
+fmt_counts <- function(x) {
+  tb <- sort(table(x), decreasing = TRUE)
+  paste0(names(tb), "(", as.integer(tb), ")", collapse = ";")
+}
+genoflu_sum <- meta %>%
+  filter(!is.na(genoflu_geno), genoflu_geno != "") %>%
+  group_by(tc_geno) %>%
+  summarise(n_genoflu = n_distinct(genoflu_geno), genoflu_genos = fmt_counts(genoflu_geno), .groups = "drop")
+genin_sum <- meta %>%
+  filter(!is.na(genin_geno), genin_geno != "") %>%
+  group_by(tc_geno) %>%
+  summarise(n_genin = n_distinct(genin_geno), genin_genos = fmt_counts(genin_geno), .groups = "drop")
+
+# per-segment sharing fields pivoted to one row per tc_geno (segments in influenza order)
+share.fields <- c("shared", "n_other_genos", "other_aliases",
+                  "origin_alias", "recipient_alias", "focal_role")
+sharing_wide <- sharing %>%
+  select(tc_geno, segment, all_of(share.fields)) %>%
+  pivot_wider(names_from = segment, values_from = all_of(share.fields),
+              names_glue = "{segment}_{.value}")
+share.col.order <- as.vector(t(outer(tc.seg.order, share.fields, paste, sep = "_")))
+
+# single wide DF by tc_geno: identity + cluster cols + genoflu/genin + per-segment sharing
+reassort_summary <- geno_tab %>%
+  left_join(genoflu_sum, by = "tc_geno") %>%
+  left_join(genin_sum,   by = "tc_geno") %>%
+  left_join(sharing_wide, by = "tc_geno") %>%
+  mutate(across(c(n_genoflu, n_genin), ~replace_na(., 0L)),
+         across(c(genoflu_genos, genin_genos), ~replace_na(., ""))) %>%
+  arrange(earliest_date) %>%
+  select(alias, tc_geno, earliest_date, n_seqs, all_of(tc.cols),
+         n_genoflu, genoflu_genos, n_genin, genin_genos, all_of(share.col.order))
+
+write.csv(reassort_summary, paste0(f.out, "tc_geno_reassort_summary.csv"), row.names = FALSE)
+cat("wrote", paste0(f.out, "tc_geno_reassort_summary.csv"), "with", nrow(reassort_summary),
+    "tc_geno rows x", ncol(reassort_summary), "cols\n")
+
+# filtered versions: only where clusters are actually shared between genotypes
+genos_with_sharing <- sharing %>% filter(shared %in% TRUE) %>% distinct(tc_geno) %>% pull(tc_geno)
+
+# (a) same wide DF, kept to tc_genos that share >=1 numeric cluster with another genotype
+reassort_summary_shared <- reassort_summary %>% filter(tc_geno %in% genos_with_sharing)
+write.csv(reassort_summary_shared, paste0(f.out, "tc_geno_reassort_summary_shared.csv"), row.names = FALSE)
+cat("wrote", paste0(f.out, "tc_geno_reassort_summary_shared.csv"), "with",
+    nrow(reassort_summary_shared), "tc_genos (>=1 shared segment)\n")
+
+# (b) long: one row per shared geno x segment event only, with origin/recipient dates
+#     and the geno's genoflu/genin summary attached
+reassort_shared_long <- sharing %>%
+  filter(shared %in% TRUE) %>%
+  left_join(reassort_summary %>%
+              select(tc_geno, n_seqs, n_genoflu, genoflu_genos, n_genin, genin_genos),
+            by = "tc_geno") %>%
+  select(alias, tc_geno, earliest_date, n_seqs, segment, cluster,
+         n_other_genos, other_aliases, origin_alias, origin_date,
+         recipient_alias, recipient_date, focal_role,
+         n_genoflu, genoflu_genos, n_genin, genin_genos) %>%
+  arrange(earliest_date, alias, segment)
+write.csv(reassort_shared_long, paste0(f.out, "tc_geno_reassort_shared_long.csv"), row.names = FALSE)
+cat("wrote", paste0(f.out, "tc_geno_reassort_shared_long.csv"), "with",
+    nrow(reassort_shared_long), "shared geno x segment rows\n")
+```
