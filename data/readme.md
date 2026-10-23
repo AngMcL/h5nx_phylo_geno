@@ -1,5 +1,5 @@
 # data
-Due to limitations with data sharing, we have excluded the data files from this repo. Authorized GISAID users may contact us directly for files. Accession lists and episet doi provided.
+Due to limitations with data sharing, we have excluded the data files from this repo. Authorized GISAID users may contact us directly for files. Accession lists and episet doi provided in ~/paper/supp_files/
 
 ## 01a_ncbi	
 * downloading and cleaning unaligned ncbi data
