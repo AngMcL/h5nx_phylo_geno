@@ -1,0 +1,410 @@
+---
+title: "Plot trees and fill-in NA subtypes, H5 clades"
+output: html_document
+date: "2025-09-18"
+---
+
+```{r}
+library(tidyverse)
+library(ape)
+library(ggtree)
+library(gtools)
+library(RColorBrewer)
+library(phangorn)
+library(cowplot)
+
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"),
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+
+# order legend categories by tree position, top to bottom (largest y in ggtree = top)
+tip_order_breaks<-function(ggt, var){
+  d<-ggt$data
+  d<-d[d$isTip & !is.na(d[[var]]), ]
+  d<-d[order(-d$y), ]
+  unique(d[[var]])
+}
+
+# segment name (large bold) + n= + left-justified scale bar, all flush-left on x=0
+add_seg_label<-function(p, tree, lab, seg.label.size=5.5, n.label.size=3.75, scale.label.size=3.5,
+                        seg.label.yfrac=1.06, n.label.yfrac=1.02, scale.yfrac=0.2,
+                        label.xfrac=0, text.xfrac=0.015, n.xfrac=0.03, scale.width=0.05){
+  NN<-Ntip(tree)
+  x_range<-max(node.depth.edgelength(tree))
+  x0<-x_range*label.xfrac #scale bar anchor
+  tx<-x_range*text.xfrac #title anchor
+  nx<-x_range*n.xfrac #n= anchor, slightly right of title
+  sw<-scale.width #fixed scale bar width (subs/site)
+  scale_y<-ceiling(NN*scale.yfrac) #lower-left, above the tree bottom
+  p +
+    coord_cartesian(ylim=c(0,NN*1.1), clip="off") +
+    annotate("segment", x=x0, xend=x0+sw, y=scale_y, yend=scale_y, linewidth=0.5) +
+    annotate("text", x=x0, y=scale_y, label=sw, hjust=0, vjust=-0.6, size=scale.label.size) +
+    annotate("text", x=tx, y=NN*seg.label.yfrac, label=lab,
+             hjust=0, vjust=1, fontface="bold", size=seg.label.size) +
+    annotate("text", x=nx, y=NN*n.label.yfrac, label=paste0("n=", NN),
+             hjust=0, vjust=1, size=n.label.size)
+}
+```
+
+## Ins and Outs
+```{r}
+#iqtrees
+tree.fold<-"../../02_iqtree/iq_gtrfr10_rooted/"
+trees.in<-list.files(tree.fold,pattern = ".treefile",full.names = T) %>%
+  mixedsort()
+
+# #fasttrees
+# tree.fold<-"../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+# trees.in<-list.files(tree.fold,pattern = ".tre",full.names = T) %>%
+#   mixedsort()
+l.tr<-length(trees.in)
+
+#use the filtered metadata after removing temp outliers
+meta.fold<-"../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+meta.in<-list.files(meta.fold, pattern="resid.csv",full.names = T) %>% 
+  mixedsort()
+
+#outputs
+today<-Sys.Date()
+f.out<-paste0(today,"_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+```
+
+## Read in the trees, meta
+```{r}
+meta<-trees<-replicate(n=l.tr, vector())
+for(i in 1:l.tr){
+  trees[[i]]<-ape::read.tree(trees.in[i])
+  meta[[i]]<-read.csv(meta.in[i])
+}
+
+## check all tree's tipnames match meta
+for (i in 1:l.tr){
+  print(all(trees[[i]]$tip.label %in% meta[[i]]$seq_new))
+}
+
+# NA subtypes are in meta
+#Parse from the subtypes
+for (i in 1:l.tr){
+  meta[[i]] <- meta[[i]] %>%
+    mutate(N_type = str_extract(subtype, "N\\d+"))  
+}
+
+table(meta[[1]]$N_type)
+   # N1    N2    N3    N4    N5    N6    N7    N8    N9 
+which(is.na(meta[[1]]$N_type)) %>% length #54
+```
+
+## plot NA trees with N_type labels
+```{r}
+type.cols<-replicate(vector,n=l.tr)
+for (i in 1:l.tr){
+  #trees with tips colored by clade
+  segment<-meta[[i]]$segment[1]
+  #only run if it is the NA tree
+  if(segment=="NA"|is.na(segment)){
+    
+  NN<-Ntip(trees[[i]])
+  meta[[i]]<- meta[[i]][order(is.na(meta[[i]]$N_type)), ]
+  meta[[i]]<-meta[[i]] %>% select(-any_of(c("X.2","X.1","X")))
+  
+  #use the same colors in plots below
+  n.ntype<-length(table(meta[[i]]$N_type)) #excl NA
+  if(n.ntype>7){type.cols[[i]]<-colorRampPalette(brewer.pal(name="Dark2",n=7))(n.ntype)}
+  if(n.ntype<=7){type.cols[[i]]<-brewer.pal(name="Dark2",n=n.ntype)}
+  names(type.cols[[i]])<-unique(meta[[i]]$N_type) %>% sort
+  
+  #basic tree
+  t<-ggtree(trees[[i]])+
+    geom_tree()
+
+  # Add the Ntypes
+  t <- t %<+% meta[[i]]
+  ntype_order<-tip_order_breaks(t,"N_type") #legend ordered top to bottom of tree
+  t$data$N_type[is.na(t$data$N_type) & t$data$isTip]<-"N/A" #show unlabelled tips in legend
+  t$data$N_type<-factor(t$data$N_type, levels=c(ntype_order,"N/A")) #legend order; N/A last
+  na_tips<-subset(t$data, isTip & N_type=="N/A") #missing-subtype tips
+  cat("NA tree: N/A (missing subtype) tips =", nrow(na_tips), "of", sum(t$data$isTip), "\n")
+  t2 <- t + geom_tippoint(aes(color = N_type),size=0.7,alpha=0.8) +
+    geom_point(data=na_tips, aes(x=x, y=y, color=N_type), size=2, alpha=0.9) + #N/A drawn larger, on top
+      theme(legend.position = c(0.05, 0.6),
+            legend.justification = c(0, 0.5),
+            legend.title=element_text(face="bold", size=16.5),
+            legend.key.size=unit(0.4,"cm"),
+            legend.text=element_text(size=15.75)) +
+    labs(color="NA type")+
+    scale_color_manual(values=c(type.cols[[i]], "N/A"="grey70"),
+                       breaks=c(ntype_order, "N/A"))+
+    guides(color=guide_legend(override.aes = list(size=2)))
+  t2<-add_seg_label(t2, trees[[i]], "NA (original labels)")
+  na_before_plot<-t2 #store for before/after composite
+  t2; ggsave(paste0(f.out, "NA_NtypesTipColor_nofill.tiff"),
+         width=5.5,height=7.5,units="in")
+  } #if NA loop
+}
+```
+
+## Propagate the NA types in the tree
+note that this was inspired by the genoflu clades fill-in.
+Also note that it looks like some NA types are wrong... (surrounded by other)
+```{r}
+# Post-order propagation function that propagates existing non-NA labels downward to missing tips. Only propagates if all non-NA labels in the current N_type are identical (monophyletic). Traverses the tree bottom-up (postorder) so smaller Ntypes are resolved first. libs ape and phangorn.
+fill_N_types <- function(tree, tip_data, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  # Ensure tip_data matches tree tip order
+  tip_data <- tip_data[match(tree$tip.label, tip_data$tip), ]
+  # Step 1: Safe propagation (bottom-up)
+  postorder_nodes <- rev(postorder(tree))
+  internal_nodes <- postorder_nodes[postorder_nodes > Ntip(tree)]
+  for (node in internal_nodes) {
+    descendants <- Descendants(tree, node, type = "tips")[[1]]
+    labels <- tip_data$N_type[descendants]
+    nonNA_labels <- labels[!is.na(labels)]
+    # Only propagate if all non-NA labels are identical
+    if (length(nonNA_labels) > 0 && length(unique(nonNA_labels)) == 1) {
+      tip_data$N_type[descendants][is.na(labels)] <- nonNA_labels[1] 
+    }
+  }
+  
+  # Step 2: Fill remaining NAs by nearest labeled tip
+  na_tips <- which(is.na(tip_data$N_type))
+  if (length(na_tips) > 0) {
+    nonNA_idx <- which(!is.na(tip_data$N_type))
+    # Compute pairwise tip distances
+    dist_matrix <- cophenetic.phylo(tree)
+    for (tip_idx in na_tips) {
+      nearest_idx <- nonNA_idx[which.min(dist_matrix[tip_idx, nonNA_idx])]
+      tip_data$N_type[tip_idx] <- tip_data$N_type[nearest_idx]
+    }
+  }
+  return(tip_data)
+}
+```
+
+#run and re-plot trees with new labels
+```{r}
+for (i in 1:l.tr){
+  segment<-meta[[i]]$segment[1]
+  #only run if it is the NA tree
+  if(segment=="NA"|is.na(segment)){
+    tip_data<-meta[[i]]%>% select(seq_new, N_type)
+  colnames(tip_data)<-c("tip","N_type")
+  set.seed(111) #randomly breaks ties
+  filled_data<-fill_N_types(trees[[i]],tip_data)
+  sum(is.na(filled_data$N_type)) 
+  
+  #attach clade_labels onto meta
+  colnames(filled_data)[1]<-"seq_new"
+  if(any(colnames(meta[[i]])=="N_type")){ #replace
+    meta[[i]]<-meta[[i]][,-which(colnames(meta[[i]])=="N_type")]
+  }
+  meta[[i]]<-left_join(meta[[i]], filled_data, by="seq_new")
+  
+  #trees with tips colored by clade
+  NN<-Ntip(trees[[i]])
+  meta[[i]]<-meta[[i]] %>% select(-any_of(c("X.2","X.1","X")))
+
+  t<-ggtree(trees[[i]])+
+    geom_tree()
+  
+  # Add the N_type (new filled in)
+  t <- t %<+% meta[[i]] 
+  ntype_order<-tip_order_breaks(t,"N_type") #legend ordered top to bottom of tree
+  t2 <- t + geom_tippoint(aes(color = N_type),size=0.7,alpha=0.85) +
+      theme(legend.position = c(0.05, 0.6),
+            legend.justification = c(0, 0.5),
+            legend.title=element_text(face="bold", size=16.5),
+            legend.key.size=unit(0.4,"cm"),
+            legend.text=element_text(size=15.75)) +
+    labs(color="NA type")+
+    scale_color_manual(values=type.cols[[i]], na.value="grey70", breaks=ntype_order)+
+    guides(color=guide_legend(override.aes = list(size=2)))
+  t2<-add_seg_label(t2, trees[[i]], "NA (filled in)")
+  t2; ggsave(paste0(f.out, "NA_NtypesTipColorFillednoNA.tiff"),
+         width=5.5,height=7.5,units="in")
+
+  #A (before) | B (after) composite, high res from the ggplot objects directly
+  na_composite<-plot_grid(na_before_plot, t2, ncol=2)
+  ggsave(paste0(f.out, segment,"_Ntypes_before-after.tiff"), na_composite,
+         width=11,height=7.5,units="in",dpi=300,bg="white")
+  }
+}
+```
+
+# Fill in and plot H5_clades (only on HA tree)
+```{r}
+clade.cols<-replicate(vector,n=l.tr)
+for (i in 1:l.tr){
+  #trees with tips colored by clade
+  segment<-meta[[i]]$segment[1]
+  #only run if it is the NA tree
+  if(is.na(segment)){next}
+  if(segment=="HA"){
+    
+  NN<-Ntip(trees[[i]])
+  meta[[i]]<- meta[[i]][order(is.na(meta[[i]]$clade)), ]
+  meta[[i]]<-meta[[i]] %>% select(-any_of(c("X.2","X.1","X")))
+  
+  #use the same colors in plots below
+  n.H5clade<-length(table(meta[[i]]$clade)) #excl NA
+  if(n.H5clade>7){clade.cols[[i]]<-colorRampPalette(brewer.pal(name="Dark2",n=7))(n.H5clade)}
+  if(n.H5clade<=7){clade.cols[[i]]<-brewer.pal(name="Dark2",n=n.H5clade)}
+  names(clade.cols[[i]])<-unique(meta[[i]]$clade) %>% sort
+  
+  #basic tree
+  t<-ggtree(trees[[i]])+
+    geom_tree()
+
+  # Add the H5clades
+  t <- t %<+% meta[[i]]
+  clade_order<-tip_order_breaks(t,"clade") #legend ordered top to bottom of tree
+  t$data$clade[is.na(t$data$clade) & t$data$isTip]<-"N/A" #show unlabelled tips in legend
+  t$data$clade<-factor(t$data$clade, levels=c(clade_order,"N/A")) #N/A is last level -> drawn last, on top
+  t2 <- t + geom_tippoint(aes(color = clade),size=0.7,alpha=0.8) +
+      theme(legend.position = c(0.05, 0.6),
+            legend.justification = c(0, 0.5),
+            legend.title=element_text(face="bold"),
+            legend.key.size=unit(0.4,"cm"),
+            legend.text=element_text(size=10.5)) +
+    labs(color="H5 clade")+
+    scale_color_manual(values=c(clade.cols[[i]], "N/A"="grey70"),
+                       breaks=c(clade_order, "N/A"))+
+    guides(color=guide_legend(override.aes = list(size=2), ncol=2))
+  t2<-add_seg_label(t2, trees[[i]], "HA (original labels)")
+  ha_before_plot<-t2 #store for before/after composite
+  t2; ggsave(paste0(f.out, "HA_H5cladesTipColor_nofill.tiff"),
+         width=6.5,height=8,units="in")
+  } #if HA loop
+}
+```
+
+## Propagate the NA clades in the tree
+note that this was inspired by the genoflu clades fill-in.
+Also note that it looks like some NA clades are wrong... (surrounded by other)
+```{r}
+# Post-order propagation function that propagates existing non-NA labels downward to missing tips. Only propagates if all non-NA labels in the current clade are identical (monophyletic). Traverses the tree bottom-up (postorder) so smaller H5clades are resolved first. libs ape and phangorn.
+fill_clades <- function(tree, tip_data, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  # Ensure tip_data matches tree tip order
+  tip_data <- tip_data[match(tree$tip.label, tip_data$tip), ]
+  # Step 1: Safe propagation (bottom-up)
+  postorder_nodes <- rev(postorder(tree))
+  internal_nodes <- postorder_nodes[postorder_nodes > Ntip(tree)]
+  for (node in internal_nodes) {
+    descendants <- Descendants(tree, node)[[1]]
+    labels <- tip_data$clade[descendants]
+    nonNA_labels <- labels[!is.na(labels)]
+    # Only propagate if all non-NA labels are identical
+    if (length(nonNA_labels) > 0 && length(unique(nonNA_labels)) == 1) {
+      tip_data$clade[descendants][is.na(labels)] <- nonNA_labels[1] 
+    }
+  }
+  
+  # Step 2: Fill remaining NAs by nearest labeled tip
+  na_tips <- which(is.na(tip_data$clade))
+  if (length(na_tips) > 0) {
+    nonNA_idx <- which(!is.na(tip_data$clade))
+    # Compute pairwise tip distances
+    dist_matrix <- cophenetic.phylo(tree)
+    for (tip_idx in na_tips) {
+      nearest_idx <- nonNA_idx[which.min(dist_matrix[tip_idx, nonNA_idx])]
+      tip_data$clade[tip_idx] <- tip_data$clade[nearest_idx]
+    }
+  }
+  return(tip_data)
+}
+```
+
+#run and re-plot trees with new labels
+```{r}
+i=1 #for HA
+for (i in 1:l.tr){
+  segment<-meta[[i]]$segment[1]
+  #only run if it is the NA tree
+  if(is.na(segment)){next}
+  if(segment=="HA"){
+    tip_data<-meta[[i]]%>% select(seq_new, clade)
+    colnames(tip_data)<-c("tip","clade")
+    set.seed(111) #randomly breaks ties
+    filled_data<-fill_clades(trees[[i]],tip_data)
+    sum(is.na(filled_data$clade)) 
+  
+    #attach clade_labels onto meta
+    colnames(filled_data)[1]<-"seq_new"
+    if(any(colnames(meta[[i]])=="clade")){ #replace
+      meta[[i]]<-meta[[i]][,-which(colnames(meta[[i]])=="clade")]
+    }
+    meta[[i]]<-left_join(meta[[i]], filled_data, by="seq_new")
+    
+    #trees with tips colored by clade
+    NN<-Ntip(trees[[i]])
+    meta[[i]]<-meta[[i]] %>% select(-any_of(c("X.2","X.1","X")))
+  
+    t<-ggtree(trees[[i]])+
+      geom_tree()
+    
+    # Add the clade (new filled in)
+    t <- t %<+% meta[[i]] 
+    clade_order<-tip_order_breaks(t,"clade") #legend ordered top to bottom of tree
+    t2 <- t + geom_tippoint(aes(color = clade),size=0.7,alpha=0.85) +
+        theme(legend.position = c(0.05, 0.6),
+              legend.justification = c(0, 0.5),
+              legend.title=element_text(face="bold"),
+              legend.key.size=unit(0.4,"cm"),
+              legend.text=element_text(size=10.5)) +
+      labs(color="H5 clade")+
+      scale_color_manual(values=clade.cols[[i]], na.value="grey70", breaks=clade_order)+
+      guides(color=guide_legend(override.aes = list(size=2),ncol=2))
+    t2<-add_seg_label(t2, trees[[i]], "HA (filled in)")
+    t2; ggsave(paste0(f.out, "HA_H5cladesTipColorFillednoNA.tiff"),
+           width=6.5,height=8,units="in")
+
+    #A (before) | B (after) composite, high res from the ggplot objects directly
+    ha_composite<-plot_grid(ha_before_plot, t2, ncol=2)
+    ggsave(paste0(f.out, segment,"_H5clades_before-after.tiff"), ha_composite,
+           width=13,height=8,units="in",dpi=300,bg="white")
+  }
+}
+```
+
+## Output the updated N_type and clade labels in meta (only once)
+```{r}
+# propagate the changes in NA meta to all meta, and the changes in HA meta to all meta
+meta.filledin<-meta[[1]] %>% select(sample, clade)
+meta.na<-meta[[3]] %>% select (sample, subtype, N_type)
+meta.filledin<-left_join(meta.filledin, meta.na, by="sample")
+
+write.csv(meta.filledin, paste0(f.out, "sample_filledin_N-type_HA-clade.csv"))
+```
+
+
+## what NA types are clearly wrong?
+
+## Flag (do not correct) tips nested in a type clade that don't match
+Just identify the mislabelled sequences (e.g. N3, N8 inside N1) sitting inside a type clade; the propagation/fill-in is left as-is since the filled types feed other plots.
+```{r}
+# #need to work on this code to identify better mrca for N1 (less deep)
+
+# target.types<-c("N1","N6")
+# for(i in 1:l.tr){
+#   segment<-meta[[i]]$segment[1]
+#   if(segment=="NA"|is.na(segment)){
+#     tr<-trees[[i]]
+#     for(target.type in target.types){
+#       type_tips<-meta[[i]]$seq_new[which(meta[[i]]$N_type==target.type)]
+#       type_mrca<-ape::getMRCA(tr, type_tips)
+#       desc_tips<-tr$tip.label[Descendants(tr, type_mrca, type="tips")[[1]]]
+#       odd<-meta[[i]] %>%
+#         filter(seq_new %in% desc_tips, N_type!=target.type) %>%
+#         select(sample, seq_new, subtype, N_type)
+#       cat("Tips inside the", target.type, "clade (MRCA node", type_mrca,
+#           ") that are not", target.type, ":", nrow(odd), "\n")
+#       print(odd)
+#     }
+#   }
+# }
+```
