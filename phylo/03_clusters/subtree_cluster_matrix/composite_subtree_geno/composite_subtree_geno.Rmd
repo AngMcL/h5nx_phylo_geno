@@ -1,0 +1,96 @@
+---
+title: "composite_subtree_geno"
+author: "Angela"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(gtools)
+library(cowplot)
+library(magick)
+library(fs)
+
+plot.theme<-theme(
+  panel.grid.minor=element_blank(),
+  panel.background=element_rect("grey95"),
+  axis.line=element_line(colour="black"),
+  text=element_text(size=10,face="bold"),
+  legend.text=element_text(size=8),
+  axis.text.x=element_text(angle=45,hjust=1,vjust=1)
+)
+```
+
+```{r paths}
+in.matrix<-"../2026-09-23_subtree_cluster_matrix_out"
+in.trees<-"../../compare_phylo_clusters/2026-07-01_compare_clusters_out/genotype_trees"
+
+f.a<-path(in.matrix,"tc_geno_vs_genoflu_geno_matrix_500_50_highlight.tiff")
+f.b<-path(in.trees,"genoflu_D1.1","PB2_genoflu_D1.1_gheatmap.tiff")
+f.c<-path(in.trees,"genoflu_B3.13","PA_genoflu_B3.13_gheatmap.tiff")
+f.d<-path(in.matrix,"tc_geno_vs_genin_geno_matrix_100_50_highlight.tiff")
+f.e<-path(in.trees,"genin_EA-2020-C","NP_genin_EA-2020-C_gheatmap.tiff")
+f.f<-path(in.trees,"genin_EA-2020-C","PA_genin_EA-2020-C_gheatmap.tiff")
+
+f.out<-paste0(Sys.Date(),"_composite_subtree_geno_out/")
+dir_create(f.out)
+```
+
+## Composite: subtree cluster matrices (A, B) + disagreeing genotype trees (C, D, E, F)
+```{r composite}
+# read TIFF, trim its own whitespace border, -> raster
+read_trimmed<-function(img_path){
+  magick::image_trim(magick::image_read(img_path))
+}
+
+# native width/height aspect ratio (post-trim), used to size panels so images aren't stretched
+img_aspect<-function(img){
+  info<-magick::image_info(img)
+  info$width[1]/info$height[1]
+}
+
+# label strip (top) + image (below), stacked so the bold panel label never
+# overlaps the image's own top content (axis labels / column names)
+label_panel<-function(img,label,label.frac=0.05){
+  strip<-ggdraw()+draw_label(label,fontface="bold",size=14,x=0.01,hjust=0)
+  panel<-ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+  plot_grid(strip,panel,ncol=1,rel_heights=c(label.frac,1-label.frac))
+}
+
+files<-c(f.a,f.b,f.c,f.d,f.e,f.f)
+missing<-files[!file_exists(files)]
+if(length(missing)>0)stop("Missing input file(s):\n",paste(missing,collapse="\n"))
+
+labels<-c(
+  "A) Genoflu vs. TreeCluster","C) GenoFlu D1.1","D) GenoFlu B3.13",
+  "B) Genin2 vs. TreeCluster","E) Genin2 EA-2020-C","F) Genin2 EA-2020-C"
+)
+
+imgs<-map(files,read_trimmed)
+panels<-map2(imgs,labels,label_panel)
+
+# shared column widths so rows line up: matrix col sized to the
+# average of the two matrices' native aspect ratios (they differ slightly),
+# tree cols sized to the trees' shared native aspect ratio
+w.matrix<-mean(c(img_aspect(imgs[[1]]),img_aspect(imgs[[4]])))
+w.tree<-img_aspect(imgs[[2]])
+rel.widths<-c(w.matrix,w.tree,w.tree)
+
+composite<-plot_grid(
+  plotlist=panels,
+  nrow=2,ncol=3,byrow=TRUE,
+  rel_widths=rel.widths,rel_heights=c(1.4,1)
+)
+
+# 450 dpi in png, tiff, and pdf (pdf embeds the panel rasters at native resolution)
+for(ext in c("png","tiff","pdf")){
+  out.file<-path(f.out,paste0("composite_subtree_geno.",ext))
+  if(ext=="tiff"){
+    ggsave(out.file,composite,width=20,height=13*1.1,dpi=450,bg="white",compression="lzw")
+  }else{
+    ggsave(out.file,composite,width=20,height=13*1.1,dpi=450,bg="white")
+  }
+  message("Wrote: ",out.file)
+}
+```
