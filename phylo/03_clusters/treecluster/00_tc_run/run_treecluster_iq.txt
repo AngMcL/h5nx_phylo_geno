@@ -1,0 +1,13 @@
+https://github.com/niemasd/TreeCluster
+TreeCluster version 1.0.4
+
+Max Clade: Cluster the leaves such that the following conditions hold for each cluster:
+
+The maximum pairwise distance between leaves in the cluster is at most t
+Leaves cannot be connected by branches with support less than or equal to s
+The leaves in the cluster must define a clade in T
+For a tree with n leaves, this algorithm is O(n) in the worst case
+If verbose mode is enabled (-v), the clades defined by the clusters will be printed to standard error
+
+
+TreeCluster.Py -i  ../../02_iqtree/gtr_f_r10_rooted/trim_nodup_nuc_HA_rooted_remiqtree_rooted.treefile -o HA_cluster_maxclade_t0.2.csv -t 0.2 -m max_clade  

@@ -1,0 +1,168 @@
+---
+title: "rename_clusters"
+output: html_document
+date: "2026-06-29"
+---
+
+## Objective
+Renumber the per-segment TreeCluster clusters so the number reflects **phylogenetic
+position** instead of TreeCluster's traversal order. For each segment, clusters are ordered
+by their **lowermost tip (min y) bottom -> top** in the rooted ML IQ-TREE and renumbered
+`{SEG}-1 .. {SEG}-N` (bottom = 1). Singletons (`{SEG}-s`) pass through unchanged.
+
+Why: TreeCluster's original numbering correlates only weakly/inconsistently with display
+position (Spearman ~0.32-0.75 across segments), so the numbers carry no reliable
+phylogenetic meaning. `max_clade` clusters are perfectly contiguous clades (contiguity=1),
+so ordering by tip position is unambiguous.
+
+Outputs (old -> new lookups + regenerated `tc_geno`/alias) feed the downstream metadata
+build, which must be re-run with the renamed IDs.
+
+# Setup
+```{r}
+library(tidyverse)
+library(ape)
+library(ggtree)
+```
+
+```{r}
+# tc_geno concatenation order (must match existing metadata tc_geno)
+seg.order<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+tree.fold<-"../../../02_iqtree/iq_gtrfr10_rooted/"
+genolook.fold<-"../../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+geno.in<-"../../../../data/08_clean-share/meta/metadata.csv"
+
+today<-Sys.Date()
+f.out<-paste0(today, "_rename_clusters_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+geno<-read.csv(geno.in)
+```
+
+# Build per-segment old -> new lookups from IQ-TREE positions
+```{r}
+# Returns a lookup tibble: seg, old, new, min_y, mean_y, size
+# Clusters ordered by lowermost tip (min y) ascending -> bottom of ladderized tree = 1.
+compute_lookup<-function(seg){
+  tree<-ape::read.tree(list.files(tree.fold, pattern=paste0("_",seg,"_"), full.names=TRUE))
+  look<-read.csv(paste0(genolook.fold,"trim_nodup_nuc_",seg,"_rooted_resid.csv"))
+  tc_col<-paste0("tc_cluster",seg)
+  sing<-paste0(seg,"-s")
+
+  # displayed (ladderized) tip y via ggtree -- same layout used in the figures
+  yd<-ggtree(tree)$data %>% filter(isTip) %>% select(label,y)
+  m<-yd %>%
+    left_join(look %>% select(seq_new,sample), by=c("label"="seq_new")) %>%
+    left_join(geno %>% select(sample,all_of(tc_col)), by="sample") %>%
+    rename(cl=all_of(tc_col)) %>%
+    filter(!is.na(cl))
+
+  per<-m %>%
+    filter(cl!=sing) %>%
+    group_by(cl) %>%
+    summarize(min_y=min(y), mean_y=mean(y), size=n(), .groups="drop") %>%
+    arrange(min_y) %>%                              # bottom (low y) first
+    mutate(new=paste0(seg,"-",row_number()))
+
+  lookup<-per %>% transmute(seg=seg, old=cl, new=new, min_y, mean_y, size)
+  # singleton bucket passes through unchanged
+  if(any(m$cl==sing)){
+    lookup<-bind_rows(lookup,
+      tibble(seg=seg, old=sing, new=sing, min_y=NA_real_, mean_y=NA_real_, size=sum(m$cl==sing)))
+  }
+  cat(sprintf("%-4s clusters renumbered: %d | singletons(%s): %d | Spearman(old#,new#)=%.3f\n",
+              seg, nrow(per), sing, sum(m$cl==sing),
+              suppressWarnings(cor(as.numeric(sub(paste0(seg,"-"),"",per$cl)),
+                                   seq_len(nrow(per)), method="spearman"))))
+  lookup
+}
+
+lookups<-map(seg.order, compute_lookup)
+names(lookups)<-seg.order
+lookup_all<-bind_rows(lookups)
+
+# write per-segment + combined lookups
+walk(seg.order, ~write.csv(lookups[[.x]],
+     paste0(f.out,"tc_cluster_rename_lookup_",.x,".csv"), row.names=FALSE))
+write.csv(lookup_all, paste0(f.out,"tc_cluster_rename_lookup_all.csv"), row.names=FALSE)
+```
+
+# VALIDATION ONLY: apply lookups, regenerate tc_geno (reference, not authoritative)
+# NOTE: the authoritative tc_geno / treecluster_genotype_alias rebuild belongs in the
+# downstream 08_all-together metadata build, which applies the per-segment lookups above.
+# This chunk only proves the relabel is a clean bijection and emits a reference map.
+```{r}
+remap_col<-function(old_vals, seg){
+  lu<-lookups[[seg]]
+  mapvec<-setNames(lu$new, lu$old)
+  unname(mapvec[as.character(old_vals)])
+}
+
+ren<-geno %>% select(sample, tc_geno, treecluster_genotype_alias,
+                     all_of(paste0("tc_cluster",seg.order)))
+# new per-segment columns
+for(seg in seg.order){
+  ren[[paste0("tc_cluster",seg,"_new")]]<-remap_col(ren[[paste0("tc_cluster",seg)]], seg)
+}
+# regenerate tc_geno from the renamed columns, in seg.order
+new_cols<-paste0("tc_cluster",seg.order,"_new")
+ren$tc_geno_new<-apply(ren[,new_cols], 1, function(r){
+  if(any(is.na(r))) return(NA_character_)
+  paste(r, collapse="_")
+})
+
+# unmapped check (old numbered IDs present in metadata but absent from tree)
+unmapped<-map_dfr(seg.order, function(seg){
+  oc<-paste0("tc_cluster",seg); nc<-paste0("tc_cluster",seg,"_new")
+  tibble(seg=seg,
+         n_unmapped=sum(!is.na(ren[[oc]]) & is.na(ren[[nc]])))
+})
+cat("\nUnmapped (non-NA old, NA new) per segment:\n"); print(unmapped)
+```
+
+# Validate: relabel is a bijection, genome groupings preserved
+```{r}
+old_g<-ren$tc_geno[!is.na(ren$tc_geno)]
+new_g<-ren$tc_geno_new[!is.na(ren$tc_geno_new)]
+cat("Distinct tc_geno  old:", n_distinct(old_g), " new:", n_distinct(new_g), "\n")
+
+pair<-ren %>% filter(!is.na(tc_geno) & !is.na(tc_geno_new)) %>%
+  distinct(tc_geno, tc_geno_new)
+cat("old->new is 1:1 ? ",
+    n_distinct(pair$tc_geno)==nrow(pair) & n_distinct(pair$tc_geno_new)==nrow(pair), "\n")
+
+# alias stays attached to the same genome group; just update its tc_geno string
+alias_map<-ren %>% filter(!is.na(treecluster_genotype_alias)) %>%
+  distinct(treecluster_genotype_alias, tc_geno, tc_geno_new) %>%
+  arrange(treecluster_genotype_alias)
+cat("alias rows (should equal n distinct alias):", nrow(alias_map),
+    " distinct alias:", n_distinct(alias_map$treecluster_genotype_alias), "\n")
+```
+
+# Write outputs
+```{r}
+# AUTHORITATIVE artifact = the per-segment lookups written above
+# (tc_cluster_rename_lookup_{SEG}.csv / _all.csv).
+
+# Validation/reference outputs -> validation/ subfolder (NOT authoritative; the
+# 08_all-together build is where tc_geno / alias are actually regenerated).
+val.out<-paste0(f.out,"validation/")
+if(!dir.exists(val.out)){dir.create(val.out)}
+write.csv(ren,       paste0(val.out,"VALIDATION_tc_cluster_renamed_samples.csv"), row.names=FALSE)
+write.csv(pair,      paste0(val.out,"VALIDATION_tc_geno_rename_lookup.csv"),      row.names=FALSE)
+write.csv(alias_map, paste0(val.out,"VALIDATION_tc_alias_rename.csv"),            row.names=FALSE)
+```
+
+# Sanity plot: new number increases bottom -> top
+```{r}
+# new index vs min_y should be perfectly monotonic by construction
+plot.df<-lookup_all %>% filter(!is.na(min_y)) %>%
+  mutate(new_num=as.numeric(sub(".*-","",new)))
+ggplot(plot.df, aes(x=min_y, y=new_num))+
+  geom_point(size=0.4)+
+  facet_wrap(~seg, scales="free")+
+  labs(x="Lowermost tip position (min y, bottom->top)", y="New cluster number")+
+  theme_bw()
+ggsave(paste0(f.out,"newnumber_vs_position.tiff"), width=8, height=6, units="in")
+```
