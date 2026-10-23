@@ -1,0 +1,149 @@
+---
+title: "plot_tree_new_geno"
+output: html_document
+date: "2025-10-10"
+---
+
+## Objectives
+* Plot treecluster genotypes on ML trees as tipcolors
+
+## TO DO
+* Modify the existing tc tree script to plot genotypes instead of clustres
+* tanglegrams of trees linked by genotype
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+library(ape)
+library(ggtree)
+library(gtools)
+library(RColorBrewer)
+```
+
+## ins/outs
+```{r}
+#threshold of choice 
+thresh<-"0.04"
+
+#TREES
+tree.fold<-"../../../02_iqtree/iq_gtrfr10_rooted/"
+trees.in<-list.files(tree.fold,pattern = ".treefile",full.names = T) %>%  mixedsort()
+
+# tree.fold<-"../../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+# trees.in<-list.files(tree.fold,pattern = ".tre",full.names = T) %>%
+#   mixedsort()
+
+l.tr<-length(trees.in)
+
+## SequenceNames and new_geno are in the tc dfs
+tc.geno.fold<-list.files("../03_tc_genotypes/", pattern = thresh,include.dirs=TRUE,full.names = T)
+tc.geno.in<-list.files(tc.geno.fold, pattern = "newgeno.csv", full.names = T) %>% mixedsort()
+
+segments.ms<-c("PB2","PB1","PA","HA","NP","NA","M","NS")%>% mixedsort()
+
+# outputs
+today<-Sys.Date()
+f.out.tree<-paste0(today,"_",thresh, "_tc_geno_trees_out/")
+if(!dir.exists(f.out.tree)){dir.create(f.out.tree)}
+```
+
+```{r}
+#plotting theme
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"), 
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+
+```
+
+## Read in the iqtrees, genotypes, plot em
+```{r}
+tc.geno<-trees<-replicate(n=l.tr, vector())
+geno.cols<-replicate(vector,n=l.tr)
+
+for (i in 1:l.tr){
+  trees[[i]]<-ape::read.tree(trees.in[i])
+  tc.geno[[i]]<-read.csv(tc.geno.in[i])
+  print(all(trees[[i]]$tip.label %in% tc.geno[[i]]$SequenceName))
+  
+  #trees with tips colored by genotype
+  segment<-segments.ms[i]
+  if(is.na(segment)){segment<-"NA_seg"}
+  tc.geno[[i]]<-tc.geno[[i]] %>% select(SequenceName, new_geno)
+
+  NN<-Ntip(trees[[i]])
+
+  #use the same colors in plots below
+  n.genotype<-length(table(tc.geno[[i]]$new_geno)) #excl NA
+  geno.cols[[i]]<-colorRampPalette(brewer.pal(name="Paired",n=12))(n.genotype)
+  names(geno.cols[[i]])<- sample(unique(tc.geno[[i]]$new_geno)) #shuffle it for contrast
+  
+  #basic tree
+  t<-ggtree(trees[[i]])+
+    geom_tree()+
+    geom_treescale(x=0, y=ceiling(NN*0.95),
+                   fontsize=3, linesize=0.5, offset=200)
+
+  # Add the genotypes
+  # all( tc.geno[[i]]$SequenceName %in% trees[[i]]$tip.label)
+  t <- t %<+% tc.geno[[i]]
+  t2 <- t + geom_tippoint(aes(color = new_geno),size=0.7,alpha=0.7) +
+    # geom_tiplab(aes(color=new_geno, label=new_geno),size=1.5,offset=0.01)+
+      theme(legend.position = "right",
+            legend.title=element_text(face="bold")) +
+    ggtitle(segment)+
+    scale_color_manual(values=geno.cols[[i]], na.value="grey70")+
+    guides(color=guide_legend(override.aes = list(size=1)))+
+    theme(legend.position = "none")
+  t2; ggsave(paste0(f.out.tree, segment,"_",thresh,"_tree_new_geno_TipColor.tiff"),
+         width=5,height=9,units="in")
+}
+```
+
+## Compare distrib of within and between new_geno pat dists
+```{r}
+# for (i in 1:l.tr){
+#   segment<-segments.ms[i]
+#   all<-cophenetic.phylo(x = trees[[i]])
+#   
+#   #remove rendundant above diag and make long
+#   mat.all<-as.matrix(all)
+#   rm(all)
+#   mat.all[lower.tri(mat.all,diag=T)] <- NA
+#   all.df<-as.data.frame(mat.all)
+#   rm(mat.all)
+#   all.df$rownm<-rownames(all.df)
+#   all.l.df<-all.df %>% pivot_longer(col=1:(ncol(all.df)-1))
+#   rm(all.df)
+#   
+#   #remove NAs
+#   all.na.rem<-which(is.na(all.l.df$value))
+#   all.l.df<-all.l.df[-all.na.rem, ]
+#   
+#   #now assign each comparison as being within or between new_genos
+#   ## join the new_genos onto each compared nuc and then within if same, otherwise between
+#   tc.geno.temp2<-tc.geno.temp1<-tc.geno[[i]] %>% select(SequenceName, new_geno)
+#   colnames(tc.geno.temp1)<-c("rownm","new_geno_1")
+#   colnames(tc.geno.temp2)<-c("name","new_geno_2")
+#   all.l.df<-left_join(all.l.df, tc.geno.temp1, by="rownm") #sloww
+#   all.l.df<-left_join(all.l.df, tc.geno.temp2, by="name")
+#   rm(tc.geno.temp1); rm(tc.geno.temp2)
+#   withinrows<-which(all.l.df$new_geno_1==all.l.df$new_geno_2)
+#   all.l.df$type<-"between"
+#   all.l.df$type[withinrows]<-"within"
+#   #rm unnecce cols (v large df) 29000^2=8.41e+08
+#   all.l.df<- all.l.df %>% select(value, type)
+#   # nrow(all.l.df)
+#   ggplot(all.l.df)+
+#     geom_density(aes(x=value, fill=type), alpha=0.5,adjust=2)+
+#     plot.theme+
+#     labs(x="Patristic distance within/between new_genos")+
+#     ggtitle(segment)+
+#     scale_fill_manual(values=c("darkred","darkblue"))
+#   ggsave(paste0(f.out.tree, segment,"_",thresh, "_patdist_withinbetween.tiff"),height=5, width =6)
+#   rm(all.l.df)
+# }
+```
