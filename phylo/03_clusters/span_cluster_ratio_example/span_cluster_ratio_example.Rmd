@@ -1,0 +1,251 @@
+---
+title: "span_cluster_ratio_example"
+author: "Angela"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Objectives
+* Illustrate the span / cluster ratio used in `subtree_cluster_matrix` (`geno_tc_cluster_summary.csv`, `geno_tc_cluster_spread.csv`) with a simulated toy tree for a single segment (HA)
+* span = max cluster ID - min cluster ID + 1 (numeric IDs only, singletons excluded); ratio = span / n_clusters
+* One tree, three queried genotypes drawn together (triangles coloured by genotype, summary table top left):
+  1. Genotype X falls in a single cluster (span 1, ratio 1)
+  2. Genotype Y falls in 3 contiguous clusters (span 3, ratio 1)
+  3. Genotype Z falls in 3 non-contiguous clusters spread over a wider span (span 7, ratio 2.3)
+* No real data: the tree is simulated as a caterpillar backbone (one tip per cluster, random branch lengths) with a tight random subtree (2-4 tips) grafted on each backbone tip, so every cluster is a monophyletic group of the closest sequences
+* The tree is ladderized before plotting and clusters are numbered bottom -> top, matching the `02_rename_clusters` convention
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+library(gtools)
+library(ape)
+library(ggtree)
+library(patchwork)
+```
+
+```{r}
+plot.theme <- theme(panel.grid.minor = element_blank(),
+                    panel.background = element_rect("grey95"),
+                    axis.line = element_line(colour = "black"),
+                    text = element_text(size = 10, face = "bold"),
+                    legend.text = element_text(size = 8),
+                    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+# tree panels: toy tree, so no axes, grid, border or legend; plain white background
+tree.theme <- theme(axis.text = element_blank(),
+                    axis.text.x = element_blank(),
+                    axis.ticks = element_blank(),
+                    axis.title = element_blank(),
+                    axis.line = element_blank(),
+                    panel.grid = element_blank(),
+                    panel.border = element_blank(),
+                    panel.background = element_rect(fill = "white", colour = NA),
+                    plot.title = element_text(size = 12, face = "bold"),
+                    plot.subtitle = element_text(size = 10, face = "plain"),
+                    legend.position = "none")
+```
+
+## ins/outs
+```{r}
+seg <- "HA"
+seed <- 2026
+n.clust <- 7                      # clusters on the tree (every cluster belongs to one genotype)
+size.range <- 2:4                 # tips per cluster
+backbone.br <- c(0.3, 1)          # runif range for backbone (between-cluster) branches
+cluster.br <- c(0.02, 0.08)       # runif range for within-cluster branches
+
+# members = cluster numbers holding the queried genotype (no overlap between genotypes);
+# geno = genotype name; col = triangle fill / legend / table colour
+scenarios <- list(
+  "01_single_cluster"        = list(members = 2, geno = "X", col = "#E41A1C"),
+  "02_contiguous_ratio1"     = list(members = 4:6, geno = "Y", col = "#984EA3"),
+  "03_noncontiguous"         = list(members = c(1, 3, 7), geno = "Z", col = "#FF7F00")
+)
+
+today <- Sys.Date()
+f.out <- paste0(today, "_summary/")
+if (!dir.exists(f.out)) {dir.create(f.out)}
+```
+
+# Functions
+## simulate tree
+```{r}
+# caterpillar backbone with one tip per cluster; each backbone tip replaced by a short-branched
+# random subtree, so each cluster is a monophyletic group of closest sequences.
+# Ladderized with ape, then clusters numbered bottom -> top.
+sim_cluster_tree <- function(n.clust, seg) {
+  tree <- stree(n.clust, type = "left", tip.label = paste0("grp", seq_len(n.clust)))
+  tree$edge.length <- runif(nrow(tree$edge), backbone.br[1], backbone.br[2])
+  for (i in seq_len(n.clust)) {
+    k <- sample(size.range, 1)
+    sub <- rtree(k, tip.label = paste0("grp", i, "_", seq_len(k)),
+                 br = runif, min = cluster.br[1], max = cluster.br[2])
+    tree <- bind.tree(tree, sub, where = which(tree$tip.label == paste0("grp", i)))
+  }
+  tree <- ladderize(tree, right = FALSE)
+
+  # tip y positions as drawn (ggtree with ladderize = FALSE keeps the ape ladderized order; y = 1 at the bottom)
+  tips <- ggtree(tree, ladderize = FALSE)$data %>%
+    filter(isTip) %>%
+    select(label, y) %>%
+    mutate(grp = sub("_\\d+$", "", label))
+
+  grp.num <- tips %>%
+    group_by(grp) %>%
+    summarise(y.mean = mean(y), .groups = "drop") %>%
+    arrange(y.mean) %>%
+    mutate(cluster_num = row_number())
+
+  tips <- tips %>%
+    left_join(grp.num %>% select(grp, cluster_num), by = "grp") %>%
+    arrange(y) %>%
+    mutate(new.label = sprintf("seq%02d", row_number()),
+           cluster = paste0(seg, "_", cluster_num))
+
+  tree$tip.label <- tips$new.label[match(tree$tip.label, tips$label)]
+  tips <- tips %>% transmute(label = new.label, cluster, cluster_num)
+  list(tree = tree, tips = tips)
+}
+```
+
+## span / ratio
+```{r}
+# same definition as subtree_cluster_matrix: span = max - min + 1, ratio = span / n_clusters
+span_ratio <- function(members) {
+  n <- length(unique(members))
+  span <- max(members) - min(members) + 1
+  tibble(n_clusters = n, span = span, ratio = round(span / n, 1))
+}
+```
+
+
+## plot tree
+```{r}
+# one tree, all genotypes: triangles filled by genotype, cluster labels right after each
+# cluster's furthest tip; summary table (genotype legend as first column) above the tree,
+# cluster legend top left of the tree panel
+plot_cluster_tree <- function(tree, tips, n.clust, scenarios, ratio.tab, seg) {
+  tips <- tips %>% mutate(cluster = factor(cluster, levels = paste0(seg, "_", seq_len(n.clust))))
+  p <- ggtree(tree, ladderize = FALSE) %<+% tips
+  d <- p$data %>% filter(isTip)
+  x.max <- max(d$x)
+  tri.pad <- x.max * 0.03  # triangle base sits just right of the cluster's furthest tip
+  lab.pad <- x.max * 0.05  # cluster label sits just right of the triangle base
+
+  # one label per cluster, vertically centred on its tips, immediately right of its furthest tip
+  lab <- d %>%
+    group_by(cluster, cluster_num) %>%
+    summarise(x = max(x) + lab.pad, y = mean(y), .groups = "drop")
+
+  # one triangle per queried cluster: apex at the cluster MRCA, base spanning its tips
+  tri <- imap_dfr(scenarios, function(sc, nm) {
+    map_dfr(sc$members, function(m) {
+      tip.lab <- d$label[d$cluster_num == m]
+      mrca <- p$data %>% filter(node == getMRCA(tree, tip.lab))
+      yr <- range(d$y[d$cluster_num == m]) + c(-0.4, 0.4)
+      tri.x <- max(d$x[d$cluster_num == m]) + tri.pad
+      tibble(genotype = sc$geno, cluster_num = m,
+             x = c(mrca$x, tri.x, tri.x), y = c(mrca$y, yr[1], yr[2]))
+    })
+  })
+
+  geno.cols <- set_names(map_chr(scenarios, "col"), map_chr(scenarios, "geno"))
+  text.size <- 16          # legend text, table text and all headers/titles
+  tri.alpha <- 0.6
+
+  p <- p +
+    geom_polygon(data = tri, inherit.aes = FALSE, alpha = tri.alpha,
+                 aes(x = x, y = y, group = interaction(genotype, cluster_num), fill = genotype)) +
+    geom_tippoint(aes(color = cluster), size = 3) +
+    geom_text(data = lab, inherit.aes = FALSE,
+              aes(x = x, y = y, label = cluster),
+              hjust = 0, size = 6) +
+    scale_color_viridis_d(name = paste(seg, "cluster"), drop = FALSE) +
+    scale_fill_manual(values = geno.cols, guide = "none") +
+    scale_x_continuous(limits = c(0, x.max * 1.15)) +
+    expand_limits(y = c(0.5, nrow(d) + 0.5)) +
+    coord_cartesian(clip = "off") +
+    theme_bw() + plot.theme + tree.theme +
+    # cluster legend: highest cluster on top (matches the tree), top left of the panel, under the table
+    guides(color = guide_legend(reverse = TRUE, override.aes = list(size = 4))) +
+    theme(legend.position = "inside",
+          legend.position.inside = c(0, 1),
+          legend.justification = c(0, 1),
+          legend.title = element_text(size = text.size, face = "bold"),
+          legend.text = element_text(size = text.size, face = "plain"),
+          legend.key.size = unit(0.7, "cm"),
+          legend.margin = margin(0, 0, 0, 0),
+          legend.background = element_blank())
+
+  # summary table; its first column is the genotype legend (fill key + name, centred)
+  tab <- ratio.tab %>%
+    transmute(Clusters = gsub(";", ", ", member_clusters),
+              Span = span, `N clusters` = n_clusters, Ratio = sprintf("%.1f", ratio))
+  tab.grob <- gridExtra::tableGrob(
+    tab, rows = NULL,
+    theme = gridExtra::ttheme_minimal(
+      base_size = text.size,
+      colhead = list(fg_params = list(fontface = "bold"))))
+
+  key.cell <- function(geno) {
+    grid::grobTree(
+      grid::rectGrob(x = unit(0.5, "npc") - unit(0.15, "cm"), width = unit(0.6, "cm"),
+                     height = unit(0.6, "cm"), just = "right",
+                     gp = grid::gpar(fill = scales::alpha(geno.cols[[geno]], tri.alpha), col = NA)),
+      grid::textGrob(geno, x = unit(0.5, "npc"), just = "left",
+                     gp = grid::gpar(fontsize = text.size)))
+  }
+  tab.grob <- gtable::gtable_add_cols(tab.grob, unit(3.2, "cm"), pos = 0)
+  tab.grob <- gtable::gtable_add_grob(
+    tab.grob, grid::textGrob("Genotype", gp = grid::gpar(fontsize = text.size, fontface = "bold")),
+    t = 1, l = 1, name = "geno-head")
+  for (k in seq_len(nrow(ratio.tab))) {
+    tab.grob <- gtable::gtable_add_grob(tab.grob, key.cell(ratio.tab$genotype[k]),
+                                        t = k + 1, l = 1, name = paste0("geno-key-", k))
+  }
+  # left-justify the table so it starts at x = 0 like the cluster legend below it
+  tab.grob$vp <- grid::viewport(x = unit(0, "npc"), just = "left",
+                                width = sum(tab.grob$widths), height = sum(tab.grob$heights))
+
+  # table stacked above the tree so it never overlaps branches
+  wrap_plots(wrap_elements(full = tab.grob), p, ncol = 1, heights = c(1, 4.5))
+}
+```
+
+# Simulate
+```{r}
+set.seed(seed)
+sim <- sim_cluster_tree(n.clust, seg)
+
+# genotype per cluster (NA = cluster not in any queried genotype)
+clust.geno <- imap_dfr(scenarios, ~ tibble(cluster_num = .x$members, genotype = .x$geno))
+tip.tab <- sim$tips %>%
+  left_join(clust.geno, by = "cluster_num")
+
+ratio.tab <- imap_dfr(scenarios, ~ span_ratio(.x$members) %>%
+                        mutate(scenario = .y, genotype = .x$geno,
+                               n_clusters_tree = n.clust,
+                               n_tips_tree = nrow(sim$tips),
+                               member_clusters = paste(paste0(seg, "_", .x$members), collapse = ";"),
+                               min_id = min(.x$members),
+                               max_id = max(.x$members)) %>%
+                        relocate(scenario, genotype, n_clusters_tree, n_tips_tree, member_clusters, min_id, max_id))
+ratio.tab
+```
+
+# Plot
+```{r}
+p.tree <- plot_cluster_tree(sim$tree, sim$tips, n.clust, scenarios, ratio.tab, seg)
+p.tree
+ggsave(paste0(f.out, "span_ratio_tree.png"), p.tree,
+       width = 9, height = max(7, 2.5 + nrow(sim$tips) * 0.25), dpi = 300)
+```
+
+# Write
+```{r}
+write.csv(ratio.tab, paste0(f.out, "span_ratio_summary.csv"), row.names = FALSE)
+write.csv(tip.tab, paste0(f.out, "span_ratio_tip_clusters.csv"), row.names = FALSE)
+write.tree(sim$tree, paste0(f.out, "sim_tree.nwk"))
+```

@@ -1,0 +1,4 @@
+"scenario","genotype","n_clusters_tree","n_tips_tree","member_clusters","min_id","max_id","n_clusters","span","ratio"
+"01_single_cluster","X",7,20,"HA_2",2,2,1,1,1
+"02_contiguous_ratio1","Y",7,20,"HA_4;HA_5;HA_6",4,6,3,3,1
+"03_noncontiguous","Z",7,20,"HA_1;HA_3;HA_7",1,7,3,7,2.3
