@@ -1,0 +1,410 @@
+---
+title: "TreeCluster genotype constellations"
+output: html_document
+date: "2025-10-17"
+---
+
+## Descrip
+Make genotype constellations across 8 segments using the output of TreeCluster max pairwise patristic distance clustering (cutoff 0.03, 0.02, ... )
+Segment order as applied by Youk et al 2023: "genotype is determined by the gene constellation enerated by concatenating the clusters of each virus strain by following gene segment order; PB2|PB1|PA|HA|NP|NA|M|NS"
+Singletons will not be treated as distinguishable with blanks (clades labelled for ex, PB1-single1_..., will be PB1-_...)
+
+# Setup
+## libs
+```{r}
+library(tidyverse)
+library(gtools)
+library(NatParksPalettes)
+library(ggalluvial)
+library(cowplot)
+library(ggh4x)
+```
+
+## ins and outs
+```{r}
+## Choice threhold
+thresh<-"0.04"
+
+#input
+files.in<-list.files("../01_tc_evaluate/2026-02-09_treecluster_maxclade_eval_out/",
+                     pattern=paste0(thresh,".csv"), full.names = T) %>% 
+  str_subset(pattern="tc-out") %>% mixedsort()
+
+##also need meta input to lookup sample for sequence names/nuc names
+#use the filtered metadata after removing temp outliers
+meta.fold<-"../../../01_fasttree/ft_rooted_outliers/2026-01-14_rem-outliers/rem_out/"
+meta.in<-list.files(meta.fold, pattern="resid.csv",full.names = T) %>% 
+  mixedsort()
+l.seg<-length(meta.in)
+
+#output fold
+f.out<-paste0(Sys.Date(),"_", thresh,"_tc_genotypes_out/")
+if(!dir.exists(f.out)){dir.create(f.out)}
+
+#plotting theme
+plot.theme<-theme(panel.grid.minor = element_blank(),
+                  panel.background = element_rect("grey95"), 
+                  axis.line = element_line(colour = "black"),
+                  text=element_text(size=10,face="bold"),
+                  legend.text=element_text(size=8),
+                  axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+plot.theme.x<-plot.theme+
+  theme(axis.text.x=element_text(angle = 45,hjust=1,vjust=1))
+
+#plot segment colors
+segments<-c("PB2","PB1","PA","HA","NP","NA","M","NS") #order for genotypes
+segments.ms<-segments %>% mixedsort
+segment.cols<-natparks.pals(name="Yellowstone", n=length(segments))
+segment.cols<-segment.cols[c(1,5,2,4,6,3,8,7)]
+names(segment.cols)<-segments
+```
+
+## Join the metadata and treecluster assignments to concat a genotype of clusters by sample
+```{r}
+meta.og<-meta<-tc<-replicate(n=l.seg, vector())
+for(i in 1:l.seg){
+  tc[[i]]<-read.csv(files.in[i])
+  meta[[i]]<-read.csv(meta.in[i])
+  #check same seg/order, all names present
+  tc[[i]]$seg[1]==meta[[i]]$segment[1]
+  all(tc[[i]]$SequenceName %in% meta[[i]]$seq_new)
+  #take meta columns we need only. genotype is from genoflu
+  meta[[i]]<- meta[[i]] %>% select(seq_new, sample, segment)
+  colnames(meta[[i]])[1]<-c("SequenceName")
+  #take tc columns needed
+  tc[[i]]<-tc[[i]] %>% select(SequenceName, cluster, seg)
+  #make singletons generic name - don't treat singleton clusters as unique!
+  tc[[i]]$cluster [str_which(tc[[i]]$cluster,"s_")]<-"s"
+  #Make a concatenated name
+  tc[[i]]<-tc[[i]] %>% unite("segcluster", seg,cluster, sep="-", remove = T)
+  # table(tc[[i]]$segcluster)
+  #join meta onto the tc output
+  meta[[i]]<-left_join(meta[[i]], tc[[i]], by="SequenceName")
+  colnames(meta[[i]])[str_which(colnames(meta[[i]]),"segcluster")]<-
+    paste0(meta[[i]]$segment[1], "_segcluster")
+  meta.og[[i]]<-meta[[i]]
+  meta[[i]]<-meta[[i]] %>% select(-segment, -SequenceName)
+}
+
+# Function to join all dataframes by "sample"
+meta.all <- reduce(meta, full_join, by = "sample")
+
+#lookin goood, now concatenate the clsuter cols
+clustcols<-paste(segments, "segcluster",sep="_")
+meta.all<-meta.all %>% unite("new_geno", all_of(clustcols), sep="_", remove = F)
+
+length(unique(meta.all$new_geno)) #5042
+length(unique(meta.all$HA)) #581
+
+#1988 unique genotypes for 0.1 #2011 if singletons are treated as diff with 0.1. 
+#7676 unique genotypes for 0.02 
+# 5400 unique genotypes for 0.03 
+# 3509 unique genotypes for 0.05 #3603 with singleton diff 0.05
+
+#Join genotypes back on to individual metafiles by isolate name (to connect directly the seqname to the genotype and clade for fuuture plots)
+for(i in 1:l.seg){
+  meta.og[[i]]<-left_join(meta.og[[i]], meta.all[,c("sample","new_geno")], by="sample")
+  write.csv(meta.og[[i]], paste0(f.out, segments.ms[i], "_meta_newgeno.csv"))
+}
+```
+
+## Look at distrib of new_geno size and composition
+## Plot clusters and new_geno frequencies
+```{r}
+## Make a long version 
+meta.all.long<-meta.all %>% pivot_longer(cols=3:ncol(meta.all) ,names_to = "segment", values_to="cluster")
+meta.all.long$segment<-str_replace_all(meta.all.long$segment, "_segcluster","")
+meta.all.long$segment<-factor(meta.all.long$segment, levels=segments)
+# which(is.na(meta.all.long$segment))
+
+#filter out minor new_genos for now
+meta.all.count<-meta.all %>% group_by(new_geno) %>% count() %>% arrange(-n)
+#minors have less than 50 detections
+Minors<-meta.all.count$new_geno [meta.all.count$n<50] %>% unique
+Majors<-meta.all.count$new_geno [meta.all.count$n>=50] %>% unique
+
+length(Minors); length(Majors)
+nrow(meta.all.count) #70 diff
+ 
+#HOw many major (non minor) genotypes??
+meta.all.count %>%
+  filter(!new_geno %in% Minors) %>% nrow() #83 for 0.03
+##plot new_genos overall counts. not ordered
+geno.ord<-meta.all.count$new_geno[order(meta.all.count$n, decreasing = T)]
+meta.all.long$new_geno<-factor(meta.all.long$new_geno, levels=geno.ord)
+
+```
+
+## Size plots
+```{r}
+# #plot clusters counts by segment
+# ggplot(meta.all.long) +
+#   geom_bar(aes(x=cluster, fill=segment))+
+#   facet_wrap(~segment, scales="free",nrow=2)+
+#   plot.theme.x+
+#   theme(legend.position = "none", axis.text.x=element_text(size=2))+
+#   scale_fill_manual(values=segment.cols)+
+#   force_panelsizes(rows = c(1, 1), cols = c(1,1,1,1))+
+#   labs(x=paste0("TreeCluster, max. pat. dist. <= ",thresh," clusters"),
+#        y="N sequence")
+# ggsave(paste0(f.out, "TreeCluster_cluster_freq_facet_segment.tiff"), height=6,width=14,units="in")
+# 
+# #plot new_genos by segment
+# meta.all.long %>%
+#   filter(!new_geno %in% Minors) %>%
+#   ggplot() +
+#     geom_bar(aes(x=new_geno, fill=segment))+
+#     facet_wrap(~segment, scales="free",nrow=2)+
+#     plot.theme.x+
+#     theme(legend.position = "none")+
+#     scale_fill_manual(values=segment.cols)+
+#     force_panelsizes(rows = c(1, 1), cols = c(1,1,1,1))+
+#     labs(x="TreeCluster genoype [>=50 seq]",y="N sequence")+
+#   theme(axis.text.x=element_blank())
+# ggsave(paste0(f.out, "TreeCluster_new_geno_freq_noMinors_facet_segment.tiff"), height=4,width=12,units="in")
+# 
+# meta.all.long %>%
+#   filter(!new_geno %in% Minors) %>%
+#   filter(segment=="HA") %>%
+#   ggplot() +
+#     geom_bar(aes(x=new_geno, fill=new_geno))+
+#     # facet_wrap(~segment, scales="free",nrow=2)+
+#     plot.theme.x+
+#     theme(legend.position = "none")+
+#     scale_fill_viridis_d(option="D")+
+#     force_panelsizes(rows = c(1, 1), cols = c(1,1,1,1))+
+#     labs(x="Major TreeCluster genoype [>=50 seq]",y="N sequence")+
+#     theme(axis.text.x=element_text(size=2))
+# ggsave(paste0(f.out, "TreeCluster_new_geno_freq_noMinors_all.tiff"), height=3,width=5,units="in")
+# 
+# #No minor filters
+# meta.all.long %>%
+#   # filter(!new_geno %in% Minors) %>%
+#   filter(segment=="HA") %>%
+#   ggplot() +
+#     geom_bar(aes(x=new_geno, fill=new_geno))+
+#     # facet_wrap(~segment, scales="free",nrow=2)+
+#     plot.theme.x+
+#     theme(legend.position = "none")+
+#     scale_fill_viridis_d(option="D")+
+#     force_panelsizes(rows = c(1, 1), cols = c(1,1,1,1))+
+#     labs(x="TreeCluster genoype",y="N sequence")+
+#       theme(axis.text.x=element_text(size=2))
+# 
+# ggsave(paste0(f.out, "TreeCluster_new_geno_freq_all.tiff"), height=3,width=8,units="in")
+# 
+# 
+# #No minor filters, LOG
+# meta.all.long %>%
+#   # filter(!new_geno %in% Minors) %>%
+#   filter(segment=="HA") %>%
+#   ggplot() +
+#     geom_bar(aes(x=new_geno, fill=new_geno))+
+#     # facet_wrap(~segment, scales="free",nrow=2)+
+#     plot.theme.x+
+#     theme(legend.position = "none")+
+#     scale_fill_viridis_d(option="D")+
+#     force_panelsizes(rows = c(1, 1), cols = c(1,1,1,1))+
+#     labs(x="TreeCluster genoype",y="Log10 (N sequence)")+
+#       theme(axis.text.x=element_text(size=2))+
+#   scale_y_log10()
+# 
+# ggsave(paste0(f.out, "TreeCluster_new_geno_Logfreq_all.tiff"), height=3,width=8,units="in")
+```
+
+## Analyze by common sample (wide)
+```{r}
+#make this a count of each genotype and the composite clusters
+colnames(meta.all)<-str_replace_all(colnames(meta.all), "_segcluster","")
+colnames(meta.all)
+
+colnames(meta.all)[which(colnames(meta.all)=="NA")]<-"xNA" #prevents issue with NA
+segments.x<-str_replace_all(segments, "NA","xNA")
+meta.all_f<-meta.all %>%
+  dplyr::group_by(new_geno, PB2, PB1, PA, HA, NP, xNA, M ,NS) %>%
+  dplyr::summarize(.groups="rowwise",
+            Freq=n())
+  
+#Filter out with Freq<10 in plots
+#although note that many have full caldes, but no genotype assignment
+nrow(meta.all_f) #3509 unique genotypes
+
+## How many are singletons??
+length(which(meta.all_f$Freq==1)) #2804 0.04
+nrow(meta.all_f) - length(which(meta.all_f$Freq==1)) #2238 at 0.04
+# 3109/5400*100 #57.6% singletons
+2238/nrow(meta.all_f) #44.4%
+## How many major with >=50
+meta.all_f %>% filter(!new_geno %in% Minors) %>% nrow #122 at 0.04
+
+## how many genotypes have NA for 2+ segmnets??
+cols_to_check <- segments %>% str_replace_all("NA","xNA")
+# Identify rows with N or more NAs among selected columns
+rows_with_N_or_more_NAs <- meta.all %>%
+  rowwise() %>%
+  mutate(num_NA = sum(is.na(c_across(all_of(cols_to_check))))) %>%
+  ungroup() %>%
+  filter(num_NA >= 2)
+rows_with_N_or_more_NAs %>% nrow() #47 for N=2
+length(unique(rows_with_N_or_more_NAs$new_geno)) #47
+```
+
+
+## Alluvial plot of clusters connected by genotypes
+```{r}
+# use an alluvial plot to connect clusters to common category
+#count for ordering
+meta.all_f$new_geno<-factor(meta.all_f$new_geno, levels=geno.ord)
+
+#only major genos
+meta.all_f %>%
+  filter(Freq >= 50) %>%
+  ggplot(aes(axis1=PB2, axis2=PB1, axis3=PA , axis4=HA, 
+             axis5=NP,axis6=xNA, axis7=M , axis8=NS, 
+             y=Freq)) +
+  scale_x_discrete(limits = segments, expand = c(.05, .01)) +
+  xlab("Segment clusters by treecluster genotype [N>=50]") +
+  ylab("N sequence")+
+  geom_alluvium(aes(fill = new_geno),width=0.6,decreasing = F) +
+  geom_stratum(width=0.6,decreasing = F) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)),decreasing = F,size=3) +
+  plot.theme+
+  theme(legend.position = "none", axis.text.x=element_text(size=rel(1.4)))+
+  scale_fill_viridis_d(option="D")
+  # guides(fill=guide_legend(nrow=2, title="Genotype"))
+
+ggsave(paste0(f.out, "alluvial_clusters_genotype50.tiff"),width=10, height=6, units="in")
+```
+## simpler, vertical layout and no labels for clusters or higher min n
+```{r}
+meta.all_f2<-meta.all %>%
+  dplyr::group_by(new_geno, NS, M, xNA, NP, HA, PA, PB1, PB2) %>%
+                  # PB2, PB1, PA, HA, NP, xNA, M ,NS) %>%
+  dplyr::summarize(.groups="rowwise",
+            Freq=n())
+  
+
+meta.all_f2 %>%
+  filter(Freq >= 100) %>%
+  ggplot(aes(axis1=NS, axis2=M, axis3=xNA , axis4=NP,
+             axis5=HA,axis6=PA, axis7=PB1, axis8=PB2,
+  # ggplot(aes(axis1=PB2, axis2=PB1, axis3=PA , axis4=HA, 
+  #            axis5=NP,axis6=xNA, axis7=M , axis8=NS, 
+             y=Freq)) +
+  scale_x_discrete(limits = rev(segments), expand = c(.05, .01)) +
+  xlab(NULL)+#"Segment clusters by treecluster genotype [N>=50]") +
+  ylab(NULL)+ #"N sequence")+
+  geom_alluvium(aes(fill = new_geno),width=0.6,decreasing = T) +
+  geom_stratum(width=0.6,decreasing = T) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)),decreasing = T,
+            size=3, min.y=1000, angle=90,reverse=T) +
+  plot.theme+
+  theme(legend.position = "none", 
+        axis.text.y=element_text(size=rel(1.4)),
+        axis.text.x=element_blank(),
+        axis.ticks=element_blank())+
+  scale_fill_viridis_d(option="D")+
+  coord_flip()+
+  scale_y_reverse()
+
+ggsave(paste0(f.out, "alluvial_clusters_genotype_less.tiff"),width=2, height=8, units="in")
+```
+
+### Alluvial for All Genos no legend
+```{r}
+#Need a unique ID for these genos
+meta.all_f2<-meta.all_f
+meta.all_f2$tempID<-paste(meta.all_f2$new_geno, 1:nrow(meta.all_f2))
+
+## Sort by size as above
+#count for ordering
+genofreq2<-meta.all_f2 %>%
+  group_by(tempID) %>%
+  summarize(total=(Freq))
+geno.freq2<-genofreq2$tempID[order(genofreq2$total, decreasing = T)]
+meta.all_f2$tempID<-factor(meta.all_f2$tempID, levels=geno.freq2)
+
+meta.all_f2 %>%
+  ggplot(aes(axis1=PB2, axis2=PB1, axis3=PA , axis4=HA, 
+             axis5=NP,axis6=xNA, axis7=M , axis8=NS, 
+             y=Freq)) +
+  scale_x_discrete(limits = segments, expand = c(.05, .01)) +
+  xlab("Segment clusters by treecluster genotype [all]") +
+  ylab("N sequence")+
+  geom_alluvium(aes(fill = tempID),width=0.6,decreasing = F) +
+  geom_stratum(width=0.6,decreasing = F) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)),decreasing = F,size=3) +
+  plot.theme+
+  theme(legend.position = "none", axis.text.x=element_text(size=rel(1.4)))+
+  scale_fill_viridis_d(option="D")
+  
+ggsave(paste0(f.out, "alluvial_clusters_tc_genotype_all-inclNA.tiff"),width=10, height=6, units="in")
+```
+
+## Export the nicely formatted data
+```{r}
+write.csv(meta.all_f, paste0(f.out, "tc_meta.all_freq.csv"))
+write.csv(meta.all, paste0(f.out, "tc_meta.all.csv"))
+write.csv(meta.all.long, paste0(f.out, "tc_meta.all.long.csv"))
+```
+
+## comparison with the genoflu clusters and genotypes
+```{r}
+meta2<-replicate(n=l.seg, vector())
+for(i in 1:l.seg){
+  meta2[[i]]<-read.csv(meta.in[i])
+  meta2[[i]]<- meta2[[i]] %>% select(sample, genotype)
+}
+#Join them all together and extract uniques
+meta2.all<-bind_rows(meta2)
+meta2.all<-meta2.all[-which(duplicated(meta2.all$sample)), ]
+nrow(meta2.all) #29,748 isolate names 
+
+#Join the new genotypes by isolate name
+meta2.all<-left_join(meta2.all, meta.all[,c("sample","new_geno")], by="sample")
+
+#co-occurence of genotypes
+t<-table(meta2.all$genotype, meta2.all$new_geno) %>% as.data.frame()
+t<-t[t$Freq>0,]
+t<-t[order(t$Freq,decreasing = T),]
+# head(t)
+colnames(t)<-c("genoflu_genotype","new_genotype","Count")
+
+## Evaluate co-occurence of genos for the most common ones
+
+# # for 0.05, (text comments)
+# t[which(t$genoflu_genotype=="B3.13"),]
+# ## All B3.13 genotypes are PB2-386_PB1-319_PA-363_HA-128_NP-207_NA-301_M-293_NS-338 (n=1579) (cutoff=0.05)
+# t[which(t$new_genotype=="PB2-386_PB1-319_PA-363_HA-128_NP-207_NA-301_M-293_NS-338"),] #for 0.05
+# #by my genos: also includes 24 with no genotypes assigned, 10 "notassigned", and 4 are B3.9
+# t[which(t$genoflu_genotype=="B3.2"),] #38 new genotypes, with varying M and PA clusters
+# t[which(t$genoflu_genotype=="B4.1"),] #16 new genotypes, with varying PA clusters
+# t[which(t$genoflu_genotype=="A3"),] #10 new genotypes, differ by NS clusters
+# t[which(t$genoflu_genotype=="B3.6"),] #all B3.6 are PB2-226_PB1-319_PA-363_HA-128_NP-207_NA-301_M-293_NS-338
+# t[which(t$new_genotype=="PB2-226_PB1-319_PA-363_HA-128_NP-207_NA-301_M-293_NS-338"),]
+# #by my genos: also includes B3.12, B3.8, B3.11, Minor79
+
+#Results as above, but for 0.03
+t[which(t$genoflu_genotype=="B3.13"),]
+## All but one B3.13 genotypes are "PB2-582_PB1-577_PA-737_HA-558_NP-354_NA-515_M-577_NS-837" (n=1578) (cutoff=0.03). One has different NS
+t[which(t$new_genotype=="PB2-582_PB1-577_PA-737_HA-558_NP-354_NA-515_M-577_NS-837"),]
+# our geno also has 24 blank and 10 NotAssigned
+
+t[which(t$genoflu_genotype=="B3.2"),] #183 new genotypes, with varying PA, HA, NA, M, NS
+t[which(t$genoflu_genotype=="B4.1"),] #21 new genotypes, with varying PA and M clusters
+t[which(t$genoflu_genotype=="A3"),] #14 new genotypes, differ by NS and PB2 clusters
+t[which(t$genoflu_genotype=="B3.6"),] #6 new genos, differing by NS. Mostly this one: 
+t[which(t$new_genotype=="PB2-293_PB1-577_PA-737_HA-558_NP-426_NA-515_M-577_NS-837"),]
+#by my genos: also includes 1 with blank genoflu genotype
+t[which(t$genoflu_genotype=="D1.1"),] #all PB2-600_PB1-342_PA-409_HA-257_NP-428_NA-137_M-485_NS-368
+t[which(t$new_genotype=="PB2-600_PB1-342_PA-409_HA-257_NP-428_NA-137_M-485_NS-368"),]
+#no other genos. Perfect match.
+t[which(t$genoflu_genotype=="A1"),] #50 new genotypes: # differ by PA, HA, NA, M
+
+# for 0.02,
+t[which(t$genoflu_genotype=="B3.13"),] #there are 15 diff new genotypes here for lower threshold, differing mostly based on PA
+
+
+write.csv(meta2.all, paste0(f.out, "isolate_genos_compare.csv"))
+write.csv(t, paste0(f.out, "genos_cooccurence.csv"),row.names = F)
+```
