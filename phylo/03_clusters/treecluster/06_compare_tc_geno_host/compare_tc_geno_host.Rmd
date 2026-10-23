@@ -1,0 +1,362 @@
+---
+title: "Host composition in treecluster genotypes"
+output: html_document
+date: "2026-05-30"
+---
+
+## Objectives
+* For each treecluster genotype (tc_geno), count the number of unique hosts (taxa2 and order) and total sequences
+* Restrict to genotypes with >= min_n sequences AND >= min_taxa2 unique taxa2 hosts
+* Plot genotypes on x-axis (ranked by number of unique hosts descending), n sequences on y-axis, filled by host composition
+* Annotate bars with N unique hosts; add a separate plot of unique host counts per genotype
+
+# Setup
+## Parameters
+```{r}
+min_n     <- 50    # minimum sequences per genotype
+min_taxa2 <- 3     # minimum unique taxa2 per genotype 
+```
+
+## Libraries
+```{r}
+library(tidyverse)
+library(patchwork)
+library(gtools)
+library(RColorBrewer)
+```
+
+## Plotting
+```{r}
+plot.theme <- theme(panel.grid.minor = element_blank(),
+                    panel.background = element_rect("grey95"),
+                    axis.line = element_line(colour = "black"),
+                    text = element_text(size = 10, face = "bold"),
+                    legend.text = element_text(size = 8),
+                    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 6),
+                    plot.margin = margin(t = 5, r = 5, b = 5, l = 70, unit = "mm"))
+```
+
+## Inputs and outputs
+```{r}
+meta.in    <- "../../../../data/08_clean-share/meta/metadata.csv"
+palette.in <- "../../../../data/06_host/multi-taxa/taxa_palette/taxa_colors_refined_contrast.csv"
+
+date.out <- format(Sys.Date(), "%Y-%m-%d")
+f.out    <- paste0(date.out, "_out/")
+dir.create(f.out, showWarnings = FALSE)
+```
+
+# Data
+## Load metadata
+```{r}
+meta <- read_csv(meta.in, show_col_types = FALSE)
+
+# tc_geno -> shorter genotype alias, used for x-axis labels across all plots
+alias.lookup <- meta %>%
+  distinct(tc_geno, treecluster_genotype_alias) %>%
+  deframe()
+```
+
+## Load taxa2 colour palette and define group-ordered factor levels
+```{r}
+pal.df <- read_csv(palette.in, show_col_types = FALSE)
+taxa2.pal <- setNames(pal.df$color_hex, pal.df$taxa2)
+```
+
+## Filter to genotypes meeting thresholds
+```{r}
+geno.summary <- meta %>%
+  filter(!is.na(tc_geno)) %>%
+  group_by(tc_geno) %>%
+  summarise(
+    n_seq   = n(),
+    n_taxa2 = n_distinct(taxa2, na.rm = TRUE),
+    n_order = n_distinct(order, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+geno.keep <- geno.summary %>%
+  filter(n_seq >= min_n, n_taxa2 >= min_taxa2)
+
+cat("Genotypes passing filters (n_seq >=", min_n, "& n_taxa2 >=", min_taxa2, "):", nrow(geno.keep), "\n")
+cat("Genotypes excluded:", nrow(geno.summary) - nrow(geno.keep), "\n")
+```
+
+## Subset metadata to kept genotypes
+```{r}
+meta.filt <- meta %>%
+  filter(tc_geno %in% geno.keep$tc_geno, !is.na(tc_geno))
+
+# genotypes with at least one mammal sample (host_group == "Mammals" in palette)
+mammal.taxa2 <- pal.df %>% filter(host_group == "Mammals") %>% pull(taxa2)
+mammal.genos <- meta.filt %>%
+  filter(taxa2 %in% mammal.taxa2) %>%
+  pull(tc_geno) %>%
+  unique()
+```
+
+# Plots
+## taxa2 composition
+```{r}
+# rank genotypes by n_taxa2 descending, then n_seq for ties
+geno.order.taxa2 <- geno.keep %>%
+  arrange(desc(n_taxa2), desc(n_seq)) %>%
+  pull(tc_geno)
+
+# stacked counts: one row per genotype x taxa2
+taxa2.counts <- meta.filt %>%
+  count(tc_geno, taxa2) %>%
+  mutate(tc_geno = factor(tc_geno, levels = geno.order.taxa2))
+
+# order taxa2 levels by overall frequency (most to least) for legend and fill
+taxa2.ordered <- taxa2.counts %>%
+  group_by(taxa2) %>%
+  summarise(total = sum(n), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  pull(taxa2) %>%
+  as.character()
+
+taxa2.counts <- taxa2.counts %>%
+  mutate(taxa2 = factor(taxa2, levels = c(taxa2.ordered,
+                                          setdiff(unique(as.character(taxa2)), taxa2.ordered))))
+
+# any taxa2 not in palette get a fallback grey
+missing.taxa2 <- setdiff(levels(taxa2.counts$taxa2), names(taxa2.pal))
+if (length(missing.taxa2) > 0) {
+  taxa2.pal <- c(taxa2.pal, setNames(rep("#AAAAAA", length(missing.taxa2)), missing.taxa2))
+}
+
+# annotation: total n_seq, n_taxa2, and mammal flag per genotype
+annot.taxa2 <- taxa2.counts %>%
+  group_by(tc_geno) %>%
+  summarise(total_n = sum(n), n_unique = n_distinct(taxa2), .groups = "drop") %>%
+  mutate(label = paste0("n=", n_unique))
+
+gap <- max(annot.taxa2$total_n) * 0.01   # small gap between bar top and label
+
+p.taxa2 <- ggplot(taxa2.counts, aes(x = tc_geno, y = n, fill = taxa2)) +
+  geom_bar(stat = "identity") +
+  geom_text(data = annot.taxa2,
+            aes(x = tc_geno, y = total_n + gap, label = label),
+            angle = 90, hjust = 0, vjust = 0.5, size = 2.5,
+            fontface = "plain", inherit.aes = FALSE) +
+  scale_fill_manual(values = taxa2.pal, name = "Host taxa") +
+  scale_x_discrete(labels = alias.lookup) +
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.08))) +
+  labs(x = "TreeCluster genotype alias", y = "Number of sequences") +
+  plot.theme
+
+ggsave(paste0(f.out, date.out, "_tc_geno_host_taxa2_composition.pdf"),
+       p.taxa2, width = 14, height = 8)
+ggsave(paste0(f.out, date.out, "_tc_geno_host_taxa2_composition.png"),
+       p.taxa2, width = 14, height = 8, dpi = 300)
+
+p.taxa2
+```
+
+## order composition
+```{r}
+# rank genotypes by n_order descending, then n_seq for ties (restrict to n_order > 1)
+geno.order.order <- geno.keep %>%
+  filter(n_order > 1) %>%
+  arrange(desc(n_order), desc(n_seq)) %>%
+  pull(tc_geno)
+
+order.counts <- meta.filt %>%
+  filter(tc_geno %in% geno.order.order) %>%
+  count(tc_geno, order) %>%
+  mutate(tc_geno = factor(tc_geno, levels = geno.order.order))
+
+# order the order levels by overall frequency (most to least); the same level
+# order drives the fill factor, the stacked bar, and the legend
+order.freq <- order.counts %>%
+  group_by(order) %>%
+  summarise(total = sum(n), .groups = "drop") %>%
+  arrange(desc(total))
+order.levels <- order.freq$order
+order.counts <- order.counts %>%
+  mutate(order = factor(order, levels = order.levels))
+
+# classify each order as mammal vs avian via taxa2 -> host_group
+order.group <- meta.filt %>%
+  filter(tc_geno %in% geno.order.order) %>%
+  left_join(pal.df %>% select(taxa2, host_group), by = "taxa2") %>%
+  count(order, host_group) %>%
+  group_by(order) %>%
+  slice_max(n, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+mammal.orders <- order.levels[order.levels %in%
+  (order.group %>% filter(host_group == "Mammals") %>% pull(order))]
+avian.orders  <- setdiff(order.levels, mammal.orders)
+
+# distinct divergent/qualitative palette per group; shuffle the colour->order
+# mapping so frequency-adjacent orders do not receive similar colours
+set.seed(42)
+avian.pal  <- sample(colorRampPalette(brewer.pal(11, "Spectral"))(length(avian.orders)))
+# drop Dark2's trailing grey (#666666) so mammal orders never read as NA grey
+mammal.pal <- sample(colorRampPalette(brewer.pal(8, "Dark2")[1:7])(length(mammal.orders)))
+order.pal <- c(setNames(avian.pal, avian.orders),
+               setNames(mammal.pal, mammal.orders))
+
+annot.order <- order.counts %>%
+  group_by(tc_geno) %>%
+  summarise(total_n = sum(n), n_unique = n_distinct(order), .groups = "drop") %>%
+  mutate(label = paste0("n=", n_unique))
+
+gap <- max(annot.order$total_n) * 0.01   # small gap between bar top and label
+
+p.order <- ggplot(order.counts, aes(x = tc_geno, y = n, fill = order)) +
+  geom_bar(stat = "identity") +
+  geom_text(data = annot.order,
+            aes(x = tc_geno, y = total_n + gap, label = label),
+            angle = 90, hjust = 0, vjust = 0.5, size = 2.5,
+            fontface = "plain", inherit.aes = FALSE) +
+  scale_fill_manual(values = order.pal, name = "Order", na.value = "grey80") +
+  scale_x_discrete(labels = alias.lookup) +
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.08))) +
+  labs(x = "TreeCluster genotype alias", y = "Number of sequences") +
+  plot.theme
+
+ggsave(paste0(f.out, date.out, "_tc_geno_host_order_composition.pdf"),
+       p.order, width = 14, height = 8)
+ggsave(paste0(f.out, date.out, "_tc_geno_host_order_composition.png"),
+       p.order, width = 14, height = 8, dpi = 300)
+
+p.order
+```
+
+## Unique host counts per genotype
+```{r}
+# unique common hosts per genotype (exclude non-host labels)
+non.host <- c("Environment", "Unknown", "Unknown bird")
+common.per.geno <- meta %>%
+  filter(tc_geno %in% geno.order.taxa2, !is.na(common_host), !common_host %in% non.host) %>%
+  group_by(tc_geno) %>%
+  summarise(n_common = n_distinct(common_host), .groups = "drop")
+
+# Long format: n_order and n_common (common host) per genotype
+unique.long <- geno.keep %>%
+  filter(tc_geno %in% geno.order.taxa2) %>%
+  left_join(common.per.geno, by = "tc_geno") %>%
+  mutate(tc_geno = factor(tc_geno, levels = geno.order.taxa2)) %>%
+  select(tc_geno, n_order, n_common) %>%
+  pivot_longer(cols = c(n_order, n_common),
+               names_to  = "host_level",
+               values_to = "n_unique") %>%
+  mutate(host_level = recode(host_level,
+                             "n_order"  = "Order",
+                             "n_common" = "common host"))
+
+p.unique <- ggplot(unique.long, aes(x = tc_geno, y = n_unique, fill = host_level)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("common host" = "#4E6C88", "Order" = "#C65A3A"),
+                    name = "host level") +
+  scale_x_discrete(labels = alias.lookup) +
+  labs(x = "TreeCluster genotype alias", y = "Number of unique hosts") +
+  plot.theme
+
+ggsave(paste0(f.out, date.out, "_tc_geno_unique_host_counts.pdf"),
+       p.unique, width = 14, height = 6)
+ggsave(paste0(f.out, date.out, "_tc_geno_unique_host_counts.png"),
+       p.unique, width = 14, height = 6, dpi = 300)
+
+p.unique
+```
+
+## common host composition (genotypes with > 25 common hosts)
+```{r}
+min_common <- 25   # minimum unique common hosts for a genotype to be shown
+min_host_n <- 10   # hosts with fewer total samples (in this subset) -> "Other"
+
+# common_host is a common-name column in the metadata; drop non-host labels
+non.host <- c("Environment", "Unknown", "Unknown bird")
+
+# genotypes with > min_common unique common hosts, ranked descending
+common.keep <- meta %>%
+  filter(!is.na(tc_geno), !is.na(common_host), !common_host %in% non.host) %>%
+  group_by(tc_geno) %>%
+  summarise(n_common = n_distinct(common_host), .groups = "drop") %>%
+  filter(n_common > min_common) %>%
+  arrange(desc(n_common))
+
+cat("Genotypes with >", min_common, "unique common hosts:", nrow(common.keep), "\n")
+
+# raw sequence counts per genotype x common_host within these genotypes
+common.raw <- meta %>%
+  filter(tc_geno %in% common.keep$tc_geno, !common_host %in% non.host, !is.na(common_host)) %>%
+  count(tc_geno, common_host)
+
+# hosts with >= min_host_n total samples (across this subset) are coloured
+# individually; rarer ones are lumped into "Other" to keep the legend manageable
+named.hosts <- common.raw %>%
+  group_by(common_host) %>%
+  summarise(total = sum(n), .groups = "drop") %>%
+  filter(total >= min_host_n) %>%
+  arrange(desc(total)) %>%
+  pull(common_host)
+
+cat("Common hosts kept (>=", min_host_n, "samples):", length(named.hosts),
+    "+ Other =", length(named.hosts) + 1, "legend entries\n")
+
+# label for the lumped bucket carries the sample threshold
+other.lab <- paste0("Other (N<", min_host_n, ")")
+
+common.counts <- common.raw %>%
+  mutate(common_host = ifelse(common_host %in% named.hosts, common_host, other.lab)) %>%
+  count(tc_geno, common_host, wt = n, name = "n") %>%
+  mutate(tc_geno = factor(tc_geno, levels = common.keep$tc_geno),
+         common_host = factor(common_host, levels = c(named.hosts, other.lab)))
+
+# divergent ramp across named hosts, shuffled so neighbours differ; Other = grey
+set.seed(42)
+common.pal <- c(
+  setNames(sample(colorRampPalette(brewer.pal(11, "Spectral"))(length(named.hosts))),
+           named.hosts),
+  setNames("grey80", other.lab)
+)
+
+# annotate each bar with the true number of unique common hosts
+annot.common <- common.counts %>%
+  group_by(tc_geno) %>%
+  summarise(total_n = sum(n), .groups = "drop") %>%
+  left_join(common.keep, by = "tc_geno") %>%
+  mutate(label = paste0("n=", n_common))
+
+gap <- max(annot.common$total_n) * 0.01   # small gap between bar top and label
+
+p.common <- ggplot(common.counts, aes(x = tc_geno, y = n, fill = common_host)) +
+  geom_bar(stat = "identity") +
+  geom_text(data = annot.common,
+            aes(x = tc_geno, y = total_n + gap, label = label),
+            angle = 90, hjust = 0, vjust = 0.5, size = 2.5,
+            fontface = "plain", inherit.aes = FALSE) +
+  scale_fill_manual(values = common.pal, name = "Common host") +
+  scale_x_discrete(labels = alias.lookup) +
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.08))) +
+  guides(fill = guide_legend(ncol = 2, keyheight = unit(3, "mm"))) +
+  labs(x = paste0("TreeCluster genotype alias (N>", min_common, ")"),
+       y = "Number of sequences (n = number of common hosts)") +
+  plot.theme +
+  theme(legend.text = element_text(size = 9, face = "plain"),
+        legend.position = "right",
+        legend.justification = "bottom",
+        axis.text.y = element_text(size = 11))
+
+ggsave(paste0(f.out, date.out, "_tc_geno_common_host_composition.pdf"),
+       p.common, width = 14, height = 9)
+ggsave(paste0(f.out, date.out, "_tc_geno_common_host_composition.png"),
+       p.common, width = 14, height = 9, dpi = 300)
+
+p.common
+```
+
+# Summary table
+```{r}
+geno.keep %>%
+  arrange(desc(n_taxa2), desc(n_seq)) %>%
+  write_csv(paste0(f.out, date.out, "_tc_geno_host_summary.csv"))
+
+geno.keep %>%
+  arrange(desc(n_taxa2), desc(n_seq))
+```
