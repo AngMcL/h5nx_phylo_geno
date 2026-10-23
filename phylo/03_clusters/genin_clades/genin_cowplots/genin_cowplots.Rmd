@@ -1,0 +1,223 @@
+---
+title: "cowplots"
+author: "It's me! Angela!"
+date: "2026-01-20"
+output: html_document
+---
+
+## genin cowplot:
+phylo trees colored by genin clusters (raw) for all 8 segments.
+nrow = 1, ncol=8 (one column per segment)
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-05-13_out"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# build combined grid
+save_grid<-function(img_dir,out_dir,segs,
+                    width=12,height=2.7,dpi=600){
+
+  paths<-path(img_dir,paste0(segs,"_geninClusters.tiff"))
+
+  if(any(!file_exists(paths))){
+    message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+    return(NA_character_)
+  }
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=length(segs),nrow=1,
+                  labels=NA)
+
+  out_name<-"allsegs_geninClusters.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=width,height=height,dpi=dpi,bg="white")
+  out_file
+}
+
+written<-save_grid(img_dir=img_dir,out_dir=out_dir,segs=segs)
+if(!is.na(written))message("Wrote: ",written)
+```
+## just HA
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-05-13_out"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+path_ha<-path(img_dir,"HA_geninClusters.tiff")
+
+if(!file_exists(path_ha)){
+  message("Missing: ",path_ha)
+}else{
+
+  grid<-img_to_gg(path_ha)
+
+  out_name<-"HA_geninClusters.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=2.5,height=4.2,dpi=300,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+
+## all segs filled in genin labels on trees
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-05-13_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames
+files<-paste0(segs,"_geninClusters.tiff")
+paths<-path(img_dir,files)
+
+if(any(!file_exists(paths))){
+  message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+}else{
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-"allsegs_geninClusters_comp.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=10,height=7.5,dpi=300,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+
+
+## genin: distribution of within-cluster patristic distances
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-02-22_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames
+files<-paste0(segs,"_patdist_withinclades.tiff")
+paths<-path(img_dir,files)
+
+if(any(!file_exists(paths))){
+  message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+}else{
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-"allsegs_patdist_withinclades_comp.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=8,height=3.5,dpi=600,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+
+## tree cluster patristic distance dsitrib within and between clusters
+```{r}
+library(cowplot)
+library(magick)
+library(fs)
+library(purrr)
+library(ggplot2)
+
+# inputs
+img_dir<-"../2026-08-20_out/"
+out_dir<-"plot_out"
+dir_create(out_dir)
+
+segs<-c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+# helper
+img_to_gg<-function(img_path){
+  img<-magick::image_read(img_path)
+  ggdraw()+draw_image(as.raster(img),x=0,y=0,width=1,height=1)+theme_void()
+}
+
+# fixed filenames
+files<-paste0(segs,"_patdist_withinbetween.tiff")
+paths<-path(img_dir,files)
+
+if(any(!file_exists(paths))){
+  message("Missing:\n",paste(paths[!file_exists(paths)],collapse="\n"))
+}else{
+
+  plots<-map(paths,img_to_gg)
+
+  grid<-plot_grid(plotlist=plots,
+                  ncol=4,nrow=2,
+                  labels=NA)
+
+  out_name<-"allsegs_patdist_withinbetweengenin_comp.png"
+  out_file<-path(out_dir,out_name)
+
+  ggsave(out_file,grid,width=8,height=3.5,dpi=600,bg="white")
+  message("Wrote: ",out_file)
+}
+```
+
+
